@@ -20,6 +20,26 @@ This project explores the integration of quantitative econometric models (e.g., 
   - **Features:** Open, High, Low, Close, Adjusted Close, Volume, Daily Log Returns, and Realized Volatility proxies.
 - **Geopolitical News:** Global news headlines and geopolitical event signals sourced from open repositories (GDELT / HuggingFace Financial Datasets).
 
+## Installation & Setup
+
+To set up the development environment locally using Conda:
+
+1. **Clone the repository:**
+    ```bash
+    git clone https://github.com/tu-usuario/brent-crude-volatility-geopolitical-risk.git
+    cd brent-crude-volatility-geopolitical-risk
+    ```
+
+2. **Recreate the Conda environment:**
+    ```bash
+    conda env create -f environment.yml
+    ```
+
+3. **Activate the environment:**
+    ```bash
+    conda activate brent-dl
+    ```
+
 ## Project Structure
 
 ```text
