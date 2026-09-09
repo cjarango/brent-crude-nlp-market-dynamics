@@ -9,7 +9,13 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     permissions:
-      contents: write 
+      contents: write
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Checkout del repositorio
@@ -32,6 +38,7 @@ jobs:
           BASE_URL: /${{ github.event.repository.name }}
 
       - name: Desplegar en GitHub Pages
+        id: deployment
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
