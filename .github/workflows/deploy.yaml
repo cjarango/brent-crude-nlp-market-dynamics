@@ -23,8 +23,11 @@ jobs:
       - name: Instalar MyST
         run: npm install -g mystmd
 
+      - name: Limpiar compilaciones anteriores
+        run: myst clean --all -y
+
       - name: Construir el sitio (Build)
-        run: myst build --html --clean
+        run: myst build --html
         env:
           BASE_URL: /${{ github.event.repository.name }}
 
