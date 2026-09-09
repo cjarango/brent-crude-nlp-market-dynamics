@@ -18,13 +18,13 @@ jobs:
       - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 20
 
       - name: Instalar MyST
         run: npm install -g mystmd
 
       - name: Construir el sitio (Build)
-        run: myst build --html
+        run: myst build --html --clean
         env:
           BASE_URL: /${{ github.event.repository.name }}
 

@@ -5,8 +5,7 @@ project:
   title: "Predicción de Volatilidad del Crudo Brent"
 
   authors:
-    - name:
-        literal: "Juan Camilo Mendoza Arango"
+    - name: "Juan Camilo Mendoza Arango"
       email: cjarango@uninorte.edu.co
       orcid: 0000-0001-6872-8311
       affiliations:
@@ -14,37 +13,34 @@ project:
           city: Barranquilla
           country: Colombia
       github: cjarango
-      corresponding: True
+      corresponding: true
 
-    - name:
-        literal: "Sergio Rafael Rada De La Cruz"
+    - name: "Sergio Rafael Rada De La Cruz"
       email: srrada@uninorte.edu.co
       affiliations:
         - name: Universidad del Norte
           city: Barranquilla
           country: Colombia
       github: s3rgiorafael2018-create
-      corresponding: True
+      corresponding: true
 
-    - name:
-        literal: "Natalia Paola Alvarado Corrales"
+    - name: "Natalia Paola Alvarado Corrales"
       email: npalvarado@uninorte.edu.co
       affiliations:
         - name: Universidad del Norte
           city: Barranquilla
           country: Colombia
       github: paolacorr67-ctrl
-      corresponding: True
+      corresponding: true
 
-    - name:
-        literal: "Miguel Ángel Pérez Vargas"
+    - name: "Miguel Ángel Pérez Vargas"
       email: vargasmiguel@uninorte.edu.co
       affiliations:
         - name: Universidad del Norte
           city: Barranquilla
           country: Colombia
       github: miguelpvmr
-      corresponding: True
+      corresponding: true
 
   exclude:
     - src/**
@@ -60,11 +56,11 @@ project:
   toc:
     - file: README.md
       title: "Introducción"
-    - file: "notebooks/01_exploratory_data_analysis.ipynb"
+    - file: notebooks/01_exploratory_data_analysis.ipynb
       title: "Análisis Exploratorio"
 
 site:
   template: book-theme
-  github: https://github.com/cjarango/brent-crude-nlp-market-dynamics.git
+  github: https://github.com/cjarango/brent-crude-nlp-market-dynamics
   options:
     style: custom.css
