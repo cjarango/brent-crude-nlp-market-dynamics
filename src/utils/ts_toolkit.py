@@ -105,43 +105,44 @@ __authors_detail__ = [
 # ---------------------------------------------------------------------------
 # Standard library
 # ---------------------------------------------------------------------------
-import io
 import base64
+import io
 import warnings
+
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+import matplotlib.transforms as mtransforms
 
 # ---------------------------------------------------------------------------
 # Third-party
 # ---------------------------------------------------------------------------
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-import matplotlib.transforms as mtransforms
 import pywt
+from IPython.display import HTML, display
 from scipy import stats
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from statsmodels.stats.diagnostic import acorr_ljungbox, het_arch
 from statsmodels.stats.multitest import multipletests
 from statsmodels.tools.sm_exceptions import InterpolationWarning
-from statsmodels.tsa.stattools import adfuller, kpss, ccf
-from IPython.display import HTML, display
+from statsmodels.tsa.stattools import adfuller, ccf, kpss
 
 # ---------------------------------------------------------------------------
 # Public API declaration
 # ---------------------------------------------------------------------------
 __all__ = [
-    "render_figure",
-    "plot_acf_pacf",
-    "plot_ccf_panels",
-    "univariate_ts_diagnostics",
-    "plot_series_and_annual_boxplot",
-    "plot_ts_boxplots_by_calendar",
-    "plot_rolling_smoothing_panels",
-    "plot_wavelet_decomposition",
     "correlation_windows_table",
     "dataframe_integrity_table",
     "descriptive_stats_table",
+    "plot_acf_pacf",
+    "plot_ccf_panels",
+    "plot_rolling_smoothing_panels",
+    "plot_series_and_annual_boxplot",
     "plot_train_test_split",
+    "plot_ts_boxplots_by_calendar",
+    "plot_wavelet_decomposition",
+    "render_figure",
+    "univariate_ts_diagnostics",
 ]
 
 # ---------------------------------------------------------------------------
@@ -335,9 +336,8 @@ def plot_acf_pacf(
 
     _validate_pads(pads)
 
-    if xlim is not None:
-        if not isinstance(xlim, (tuple, list)) or len(xlim) != 2:
-            raise TypeError("'xlim' must be None or a tuple/list of length 2.")
+    if xlim is not None and (not isinstance(xlim, (tuple, list)) or len(xlim) != 2):
+        raise TypeError("'xlim' must be None or a tuple/list of length 2.")
 
     _validate_ylim(ylim)
     _validate_figsize(figsize)
@@ -349,12 +349,12 @@ def plot_acf_pacf(
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize, sharey=True)
 
-    common_kwargs = dict(
-        lags=lags,
-        zero=False,
-        color="black",
-        vlines_kwargs={"color": "black", "linewidth": 0.8},
-    )
+    common_kwargs = {
+        "lags": lags,
+        "zero": False,
+        "color": "black",
+        "vlines_kwargs": {"color": "black", "linewidth": 0.8},
+    }
 
     plot_acf(series, ax=ax1, title=titles[0], **common_kwargs)
     plot_pacf(series, ax=ax2, title=titles[1], **common_kwargs)
@@ -2341,9 +2341,8 @@ def plot_ccf_panels(
 
     _validate_pads(pads)
 
-    if xlim is not None:
-        if not isinstance(xlim, (tuple, list)) or len(xlim) != 2:
-            raise TypeError("'xlim' must be None or a tuple/list of length 2.")
+    if xlim is not None and (not isinstance(xlim, (tuple, list)) or len(xlim) != 2):
+        raise TypeError("'xlim' must be None or a tuple/list of length 2.")
 
     _validate_ylim(ylim)
     _validate_y_step(y_step)
@@ -2461,7 +2460,7 @@ def plot_train_test_split(
     split_alpha=0.8,
     shade_color="lightgray",
     shade_alpha=0.3,
-    shade_extend=pd.Timedelta(days=300),
+    shade_extend=pd.Timedelta(days=300),  # noqa: B008
     line_color="black",
     line_width=1.0,
     pads=(9, 9, 12),
@@ -2767,16 +2766,14 @@ def _validate_figsize(figsize):
 
 def _validate_ylim(ylim):
     """Validate an optional ``(ymin, ymax)`` y-limits tuple."""
-    if ylim is not None:
-        if not isinstance(ylim, (tuple, list)) or len(ylim) != 2:
-            raise TypeError("'ylim' must be None or a tuple/list of length 2.")
+    if ylim is not None and (not isinstance(ylim, (tuple, list)) or len(ylim) != 2):
+        raise TypeError("'ylim' must be None or a tuple/list of length 2.")
 
 
 def _validate_y_step(y_step):
     """Validate an optional positive y-axis step."""
-    if y_step is not None:
-        if not _is_number(y_step) or y_step <= 0:
-            raise ValueError("'y_step' must be None or a positive number.")
+    if y_step is not None and (not _is_number(y_step) or y_step <= 0):
+        raise ValueError("'y_step' must be None or a positive number.")
 
 
 def _validate_y_format(y_format):
@@ -2850,25 +2847,25 @@ def _apply_year_axis(ax, interval=2, formatter="%Y"):
 
 def _boxplot_kwargs(box_facecolor="white", box_width=0.6):
     """Return the shared keyword arguments used by every boxplot call."""
-    return dict(
-        widths=box_width,
-        patch_artist=True,
-        flierprops={
+    return {
+        "widths": box_width,
+        "patch_artist": True,
+        "flierprops": {
             "marker": "o",
             "markersize": 1.5,
             "markerfacecolor": "black",
             "markeredgecolor": "black",
             "markeredgewidth": 0.5,
         },
-        boxprops={
+        "boxprops": {
             "facecolor": box_facecolor,
             "edgecolor": "black",
             "linewidth": 0.8,
         },
-        whiskerprops={"color": "black", "linewidth": 0.8},
-        capprops={"color": "black", "linewidth": 0.8},
-        medianprops={"color": "black", "linewidth": 0.8},
-    )
+        "whiskerprops": {"color": "black", "linewidth": 0.8},
+        "capprops": {"color": "black", "linewidth": 0.8},
+        "medianprops": {"color": "black", "linewidth": 0.8},
+    }
 
 
 def _table_style_rules():
