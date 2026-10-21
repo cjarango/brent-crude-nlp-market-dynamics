@@ -54,10 +54,18 @@ project:
     - .ruff_cache/**
 
   toc:
-    - file: README.md
-      title: "Introducción"
-    - file: notebooks/01_exploratory_data_analysis.ipynb
-      title: "Análisis Exploratorio"
+  - file: README.md
+    title: "Introducción"
+  - file: notebooks/01_exploratory_data_analysis.ipynb
+    title: "Análisis Exploratorio"
+  - file: notebooks/02_arch_model.ipynb
+    title: "Modelo ARCH"
+  - file: notebooks/03_garch_model.ipynb
+    title: "Modelo GARCH"
+  - file: notebooks/04_egarch_model.ipynb
+    title: "Modelo EGARCH"
+  - file: notebooks/05_gjr_model.ipynb
+    title: "Modelo GJR"
 
 site:
   template: book-theme
