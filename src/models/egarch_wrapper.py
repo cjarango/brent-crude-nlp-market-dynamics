@@ -13,7 +13,7 @@ Dependencies
 numpy, pandas, arch, scipy, tqdm
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 from typing import Any
 
@@ -81,7 +81,17 @@ class EGARCHWrapper(BaseVolatilityModel):
         return max(self.p, self.q)
 
     def _compute_expected_abs_z(self) -> float:
-        """Computes the expected value of the absolute standardized residuals."""
+        """Returns the centering constant E|z| used in the EGARCH magnitude term.
+
+        The `arch` library centers |z| with sqrt(2/pi) in its EGARCH recursion
+        for every distribution (normal, t and GED). The forecast recursion must
+        use the same constant to reproduce the fitted conditional variance;
+        otherwise out-of-sample forecasts drift away from the estimated model.
+        """
+        return float(np.sqrt(2 / np.pi))
+
+    def _compute_theoretical_abs_z(self) -> float:
+        """Computes the theoretical E|z| of the standardized innovation distribution."""
         if self.dist == 'normal':
             return float(np.sqrt(2 / np.pi))
         elif self.dist == 't':
@@ -105,9 +115,9 @@ class EGARCHWrapper(BaseVolatilityModel):
             y_train, 
             mean='Zero', 
             vol='EGARCH', 
-            p=self.p, 
+            p=self.q, 
             o=self.q, 
-            q=self.q, 
+            q=self.p, 
             dist=self.dist
         )
         
@@ -129,7 +139,7 @@ class EGARCHWrapper(BaseVolatilityModel):
                 for j in range(1, self.p + 1)
             ])
             
-            self.is_stationary = bool(np.sum(self.betas) < 1.0)
+            self.is_stationary = bool(np.abs(np.sum(self.betas)) < 1.0)
             self.E_abs_z = self._compute_expected_abs_z()
             
             max_lag = self.context_length
@@ -227,7 +237,7 @@ class EGARCHWrapper(BaseVolatilityModel):
             y_boot = boot_resid * cond_vol
             
             try:
-                am_boot = arch_model(y_boot, mean='Zero', vol='EGARCH', p=self.p, o=self.q, q=self.q, dist=self.dist)
+                am_boot = arch_model(y_boot, mean='Zero', vol='EGARCH', p=self.q, o=self.q, q=self.p, dist=self.dist)
                 res_boot = am_boot.fit(disp='off')
                 for p in self.model_fit.params.index:
                     boot_params[p].append(res_boot.params[p])
