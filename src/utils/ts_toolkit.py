@@ -34,6 +34,10 @@ Autocorrelation
 Stationarity / Residual Diagnostics
     univariate_ts_diagnostics
 
+Distribution Fit
+    plot_distribution_fit
+    distribution_fit_table
+
 Trend & Seasonality
     plot_series_and_annual_boxplot
     plot_ts_boxplots_by_calendar
@@ -58,7 +62,7 @@ numpy, pandas, matplotlib, scipy, statsmodels, PyWavelets (pywt), IPython
 # ---------------------------------------------------------------------------
 # Metadata
 # ---------------------------------------------------------------------------
-__version__ = "1.0.0"
+__version__ = "1.4.1"
 
 __author__ = (
     "Juan Camilo Mendoza Arango <cjarango@uninorte.edu.co>, "
@@ -122,7 +126,7 @@ import pywt
 from IPython.display import HTML, display
 from scipy import stats
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
-from statsmodels.stats.diagnostic import acorr_ljungbox, het_arch
+from statsmodels.stats.diagnostic import acorr_ljungbox, het_arch, lilliefors
 from statsmodels.stats.multitest import multipletests
 from statsmodels.tools.sm_exceptions import InterpolationWarning
 from statsmodels.tsa.stattools import adfuller, ccf, kpss
@@ -134,8 +138,10 @@ __all__ = [
     "correlation_windows_table",
     "dataframe_integrity_table",
     "descriptive_stats_table",
+    "distribution_fit_table",
     "plot_acf_pacf",
     "plot_ccf_panels",
+    "plot_distribution_fit",
     "plot_rolling_smoothing_panels",
     "plot_series_and_annual_boxplot",
     "plot_train_test_split",
@@ -171,6 +177,8 @@ _DEFAULT_ROW_LABELS = (
     "Count", "Mean", "Std. Dev.", "Min",
     "Q1", "Median", "Q3", "Max", "IQR",
 )
+
+_DEFAULT_PARAM_LABELS = {"mu": "μ", "sigma": "σ", "nu": "ν"}
 
 
 # ===========================================================================
@@ -253,65 +261,7 @@ def plot_acf_pacf(
     fmt="svg",
     dpi=100,
 ):
-    """Plot the ACF and PACF of a univariate series side by side.
-
-    Draws the autocorrelation and partial autocorrelation functions of
-    the given series using ``statsmodels`` and applies a consistent,
-    publication-ready style (black stems, light-gray confidence bands,
-    thin black spines). The figure is optionally passed to
-    ``render_figure`` for inline rendering.
-
-    Args:
-        series (array-like or pandas.Series): Input time series. NaNs are
-            dropped before plotting.
-        titles (tuple or list of str): Titles for the ACF and PACF
-            subplots respectively. Must contain exactly two elements.
-            Defaults to ``("Autocorrelation Function",
-            "Partial Autocorrelation Function")``.
-        xlab (str): Label for the x-axis of both subplots. Defaults to
-            ``"Lag"``.
-        ylab (str): Label for the y-axis of the left subplot. Defaults to
-            ``"Autocorrelation"``.
-        pads (tuple of float): Padding values ``(pad_x, pad_y, pad_title)``
-            applied to the x-axis label, the y-axis label and the titles,
-            respectively. Defaults to ``(9, 9, 12)``.
-        label_size (float): Font size for the axis labels. Defaults to 12.
-        title_size (float): Font size for the subplot titles. Defaults to
-            12.
-        tick_size (float): Font size for the tick labels. Defaults to 11.
-        xlim (tuple of float, optional): ``(xmin, xmax)`` limits for the
-            x-axis of both subplots. If ``None``, matplotlib defaults are
-            used.
-        ylim (tuple of float, optional): ``(ymin, ymax)`` limits for the
-            y-axis of both subplots. Defaults to ``(-1.1, 1.1)``.
-        x_ticks (array-like, optional): Explicit x-axis tick positions for
-            both subplots. If ``None``, matplotlib chooses them.
-        y_ticks (array-like, optional): Explicit y-axis tick positions for
-            both subplots. If ``None``, matplotlib chooses them.
-        lags (int): Number of lags to display in both ACF and PACF.
-            Defaults to 50.
-        figsize (tuple of float): Figure size in inches. Defaults to
-            ``(8, 4)``.
-        render (bool): If ``True``, the figure is passed to
-            ``render_figure`` for inline rendering. Defaults to ``True``.
-        fmt ({"svg", "png"}): Output format forwarded to ``render_figure``
-            when ``render=True``. Defaults to ``"svg"`` (vector).
-        dpi (int): Resolution forwarded to ``render_figure``; only takes
-            effect when ``fmt="png"``. Defaults to ``100``.
-
-    Returns:
-        tuple: ``(fig, (ax1, ax2))`` with the matplotlib figure and the
-        two axes (ACF on the left, PACF on the right).
-
-    Raises:
-        TypeError: If ``series`` has no ``dropna`` attribute, if any of
-            ``titles``, ``pads``, ``figsize`` is not a tuple/list, or if
-            any of ``xlim``, ``ylim`` is not a tuple/list of length 2.
-        ValueError: If ``series`` is empty, if ``titles`` or ``pads`` do
-            not contain the expected number of elements, if ``titles``
-            contains non-string elements, or if ``lags`` is not a
-            positive integer.
-    """
+    """Plot the ACF and PACF of a univariate series side by side."""
     if not hasattr(series, "dropna"):
         raise TypeError(
             "'series' must be a pandas Series or similar object with a "
@@ -404,6 +354,7 @@ def univariate_ts_diagnostics(
     p_adjust=None,
     p_adjust_title="p-ajustado",
     include_arch=True,
+    include_normality=True,
     alpha=0.05,
     adf_autolag="AIC",
     kpss_regression="c",
@@ -411,91 +362,7 @@ def univariate_ts_diagnostics(
     decimals=4,
     render=True,
 ):
-    """Run a diagnostic battery on a univariate time series and tabulate it.
-
-    Runs ADF, KPSS, Ljung-Box and (optionally) ARCH-LM tests on a single
-    univariate series, formats the p-values in APA style, and returns
-    both the plain and the styled DataFrame. Optionally renders the
-    styled table as centered HTML (useful in Jupyter notebooks).
-
-    When ``p_adjust`` is provided, an extra column (named
-    ``p_adjust_title``) is added with adjusted p-values computed **by
-    block**. Each block is identified by a string prefix that is matched
-    against the beginning of the test-name column (e.g. ``"Ljung-Box"``
-    matches every row whose test name starts with ``"Ljung-Box"``). The
-    correction is applied only within each block, so ADF and KPSS (whose
-    null hypotheses are complementary, not redundant) are not lumped
-    together. The conclusion column is computed using the adjusted
-    p-value whenever a row belongs to an adjusted block, and falls back
-    to the raw p-value otherwise.
-
-    Args:
-        series (pandas.Series): Input time series. NaNs are dropped
-            before running the tests.
-        lags (tuple or list of int): Lags at which the Ljung-Box (and, if
-            ``include_arch`` is ``True``, the ARCH-LM) tests are
-            evaluated. Defaults to ``(10, 20, 30)``.
-        column_titles (tuple or list of str): Column names for the output
-            table in the order ``(test, statistic, p_value, conclusion)``.
-            Must contain exactly four strings. Defaults to
-            ``("Prueba", "Estadístico", "p-valor",
-            "Conclusión (α = .05)")``.
-        acronym (bool): If ``True``, the ADF and KPSS test names are
-            shown as short acronyms (``"ADF"``, ``"KPSS"``). If ``False``
-            (default), the full names are used with the acronym in
-            parentheses. Defaults to ``False``.
-        p_adjust (tuple or list of tuple, optional): Sequence of
-            ``(block_prefix, method)`` tuples defining which rows get a
-            multiple-testing correction and how. ``block_prefix`` is
-            matched against the beginning of the test-name column
-            (case-sensitive). Supported ``method`` values follow
-            ``statsmodels.stats.multitest.multipletests`` plus aliases
-            ``"bh" -> "fdr_bh"``, ``"by" -> "fdr_by"``,
-            ``"tsbh" -> "fdr_tsbh"``, ``"tsbky" -> "fdr_tsbky"``,
-            ``"bonf" -> "bonferroni"``. If ``None`` (default), no
-            adjustment is applied and the extra column is not created.
-        p_adjust_title (str): Name of the column that will store the
-            adjusted p-values. Only used when ``p_adjust`` is not
-            ``None``. Must not collide with any element of
-            ``column_titles``. Defaults to ``"p-ajustado"``.
-        include_arch (bool): If ``True``, add ARCH-LM tests for each lag
-            in ``lags``. If ``False``, only ADF, KPSS and Ljung-Box are
-            run. Defaults to ``True``.
-        alpha (float): Significance level used to build the conclusion
-            column. Must be in ``(0, 1)``. Defaults to 0.05.
-        adf_autolag (str or None): Lag selection criterion passed to
-            ``adfuller`` (``"AIC"``, ``"BIC"``, ``"t-stat"`` or
-            ``None``). Defaults to ``"AIC"``.
-        kpss_regression (str): Null hypothesis type for ``kpss``
-            (``"c"`` for level-stationary, ``"ct"`` for trend-stationary).
-            Defaults to ``"c"``.
-        kpss_nlags (int or str): Number of lags for ``kpss``; ``"auto"``
-            uses the default heuristic. Defaults to ``"auto"``.
-        decimals (int): Number of decimals used to format the statistic
-            column. Defaults to 4.
-        render (bool): If ``True``, the styled table is rendered as
-            centered HTML via ``IPython.display``. Defaults to ``True``.
-
-    Returns:
-        pandas.DataFrame: The plain (unstyled) results table, including
-        the adjusted p-value column when ``p_adjust`` is provided. The
-        styled version is built internally and, when ``render=True``,
-        rendered as HTML — it is not returned.
-
-    Raises:
-        TypeError: If ``series`` has no ``dropna`` method, if ``lags`` or
-            ``column_titles`` is not a tuple/list, if ``column_titles``
-            elements are not strings, if ``acronym`` is not a boolean,
-            if ``render`` is not a boolean, if ``p_adjust`` is not a
-            tuple/list of ``(prefix, method)`` tuples of strings, or if
-            ``p_adjust_title`` is not a string.
-        ValueError: If ``series`` is empty after dropping NaNs, if
-            ``lags`` is empty or contains non-positive integers, if
-            ``column_titles`` does not contain exactly four elements, if
-            ``alpha`` is not in ``(0, 1)``, if ``p_adjust`` is empty, if
-            any ``method`` in ``p_adjust`` is unsupported, or if
-            ``p_adjust_title`` collides with a name in ``column_titles``.
-    """
+    """Run a diagnostic battery on a univariate time series and tabulate it."""
     if not hasattr(series, "dropna"):
         raise TypeError(
             "'series' must be a pandas Series or similar object with a "
@@ -608,6 +475,21 @@ def univariate_ts_diagnostics(
                 col_p: arch_res[1],
             })
 
+    if include_normality:
+        jb_stat, jb_p = stats.jarque_bera(series)
+        rows.append({
+            col_test: "Jarque-Bera",
+            col_stat: jb_stat,
+            col_p: jb_p,
+        })
+        
+        lf_stat, lf_p = lilliefors(series, dist='norm', pvalmethod='table')
+        rows.append({
+            col_test: "Lilliefors",
+            col_stat: lf_stat,
+            col_p: lf_p,
+        })
+
     df_inferencial = pd.DataFrame(rows)
     df_inferencial["_p_raw_num"] = pd.to_numeric(
         df_inferencial[col_p], errors="coerce"
@@ -671,6 +553,363 @@ def univariate_ts_diagnostics(
     return df_inferencial
 
 
+def plot_distribution_fit(
+    series,
+    dist="t",
+    params=None,
+    param_labels=None,
+    titles=None,
+    xlab="Value",
+    ylab_left="Density",
+    xlab_right="Theoretical Quantiles",
+    ylab_right="Sample Quantiles",
+    pads=(9, 9, 12),
+    label_size=12,
+    title_size=12,
+    tick_size=11,
+    bins=80,
+    line_width=1.5,
+    marker_size=10,
+    marker_alpha=0.6,
+    ref_line_color="black",
+    ref_line_linestyle="--",
+    ref_line_width=1.0,
+    right_yaxis=True,
+    figsize=(10, 4.5),
+    render=True,
+    fmt="svg",
+    dpi=100,
+):
+    """Plot histogram with fitted density and Q-Q plot for one distribution.
+
+    Fits either a Normal or a t-Student distribution to the series
+    (controlled by ``dist``). The left panel shows the histogram with
+    the fitted density overlaid; the right panel shows the Q-Q plot
+    (theoretical quantiles on the x-axis, sample quantiles on the
+    y-axis) with a y=x reference line. The fitted parameters are
+    displayed in the legend of the left panel. Only one distribution
+    is shown per call; the two are never overlaid.
+
+    Args:
+        series (pandas.Series): Input series. NaNs are dropped before
+            fitting and plotting.
+        dist ({"normal", "t"}): Distribution to fit and display.
+            Defaults to ``"t"``.
+        params (dict, optional): Dictionary with the distribution parameters.
+            If ``None``, they are estimated via Maximum Likelihood.
+            For ``dist="normal"``, keys must be 'mu' and 'sigma'.
+            For ``dist="t"``, keys must be 'nu', 'loc', and 'scale'.
+        param_labels (dict, optional): Custom labels for the distribution
+            parameters. Keys must be 'mu', 'sigma', and 'nu'. Defaults
+            to ``{"mu": "μ", "sigma": "σ", "nu": "ν"}``.
+        titles (tuple or list of str, optional): Panel titles
+            ``(hist_title, qq_title)``. If ``None``, titles are
+            auto-generated based on ``dist``.
+        xlab (str): X-axis label for the histogram panel. Defaults to
+            ``"Value"``.
+        ylab_left (str): Y-axis label for the histogram panel.
+            Defaults to ``"Density"``.
+        xlab_right (str): X-axis label for the Q-Q panel (theoretical
+            quantiles). Defaults to ``"Theoretical Quantiles"``.
+        ylab_right (str): Y-axis label for the Q-Q panel (sample
+            quantiles). Defaults to ``"Sample Quantiles"``.
+        pads (tuple of float): Padding values ``(pad_x, pad_y,
+            pad_title)``. Defaults to ``(9, 9, 12)``.
+        label_size (float): Font size for the axis labels. Defaults
+            to 12.
+        title_size (float): Font size for the panel titles. Defaults
+            to 12.
+        tick_size (float): Font size for the tick labels and legend.
+            Defaults to 11.
+        bins (int): Number of histogram bins. Defaults to 80.
+        line_width (float): Width of the fitted density line. Defaults
+            to 1.5.
+        marker_size (float): Size of the Q-Q scatter markers. Defaults
+            to 10.
+        marker_alpha (float): Alpha of the Q-Q scatter markers.
+            Defaults to 0.6.
+        ref_line_color (str): Color of the y=x reference line in the
+            Q-Q plot. Defaults to ``"black"``.
+        ref_line_linestyle (str): Line style of the reference line.
+            Defaults to ``"--"``.
+        ref_line_width (float): Width of the reference line. Defaults
+            to 1.0.
+        right_yaxis (bool): If ``True``, the Q-Q plot's y-axis is moved
+            to the right side. Defaults to ``True``.
+        figsize (tuple of float): Figure size in inches. Defaults to
+            ``(10, 4.5)``.
+        render (bool): If ``True``, the figure is passed to
+            ``render_figure`` for inline rendering. Defaults to
+            ``True``.
+        fmt ({"svg", "png"}): Output format forwarded to
+            ``render_figure``. Defaults to ``"svg"``.
+        dpi (int): Resolution forwarded to ``render_figure``; only
+            takes effect when ``fmt="png"``. Defaults to ``100``.
+
+    Returns:
+        tuple: ``(fig, (ax1, ax2))`` with the matplotlib figure and the
+        two axes (histogram/density on the left, Q-Q plot on the
+        right).
+
+    Raises:
+        TypeError: If ``series`` has no ``dropna`` method, if
+            ``titles`` (when provided) is not a tuple/list of two
+            strings, or if ``figsize`` is not a tuple/list of length 2.
+        ValueError: If ``series`` is empty after dropping NaNs, or if
+            ``dist`` is not one of ``{"normal", "t"}``.
+    """
+    if not hasattr(series, "dropna"):
+        raise TypeError(
+            "'series' must be a pandas Series or similar object with a "
+            "'dropna' method."
+        )
+
+    series = series.dropna()
+    if len(series) == 0:
+        raise ValueError("'series' is empty after dropping NaNs.")
+
+    if dist not in ("normal", "t"):
+        raise ValueError(f"'dist' must be 'normal' or 't', got '{dist}'.")
+
+    if param_labels is None:
+        param_labels = _DEFAULT_PARAM_LABELS
+
+    _validate_pads(pads)
+    _validate_figsize(figsize)
+
+    pad_x, pad_y, pad_title = pads
+
+    n = len(series)
+    x_min, x_max = float(series.min()), float(series.max())
+    x = np.linspace(x_min, x_max, 1000)
+    p = (np.arange(1, n + 1) - 0.5) / n
+
+    if dist == "normal":
+        if params is not None:
+            mu = params["mu"]
+            sigma = params["sigma"]
+        else:
+            mu, sigma = stats.norm.fit(series)
+            
+        pdf = stats.norm.pdf(x, mu, sigma)
+        theoretical_q = stats.norm.ppf(p, mu, sigma)
+        legend_label = f"Normal ({param_labels.get('mu', 'μ')} = {mu:.4f}, {param_labels.get('sigma', 'σ')} = {sigma:.4f})"
+        if titles is None:
+            titles = ("Histograma y Densidad Normal", "Q-Q Plot (Normal)")
+    else:
+        if params is not None:
+            nu = params["nu"]
+            loc = params["loc"]
+            scale = params["scale"]
+        else:
+            nu, loc, scale = stats.t.fit(series)
+            
+        pdf = stats.t.pdf(x, nu, loc, scale)
+        theoretical_q = stats.t.ppf(p, nu, loc, scale)
+        
+        # AHORA SOLO MUESTRA EL NU (GRADOS DE LIBERTAD) EN LA LEYENDA
+        nu_lbl = param_labels.get('nu', 'ν')
+        legend_label = f"t-Student ({nu_lbl} = {nu:.4f})"
+        
+        if titles is None:
+            titles = ("Histograma y Densidad t-Student", "Q-Q Plot (t-Student)")
+
+    if not isinstance(titles, (tuple, list)) or len(titles) != 2:
+        raise TypeError("'titles' must be None or a tuple/list of two strings.")
+
+    sample_q = np.sort(series.values)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
+
+    for ax in (ax1, ax2):
+        _style_axes(ax, tick_size)
+
+    ax1.hist(
+        series, bins=bins, density=True, color="white", edgecolor="black",
+        linewidth=0.5, alpha=0.7, label="Datos"
+    )
+    ax1.plot(x, pdf, color="black", linewidth=line_width, label=legend_label)
+    ax1.set_title(titles[0], fontsize=title_size, pad=pad_title)
+    ax1.set_xlabel(xlab, fontsize=label_size, labelpad=pad_x)
+    ax1.set_ylabel(ylab_left, fontsize=label_size, labelpad=pad_y)
+    ax1.legend(frameon=False, fontsize=tick_size)
+
+    ax2.scatter(
+        theoretical_q, sample_q,
+        color="black", s=marker_size, alpha=marker_alpha,
+    )
+    q_min = min(theoretical_q.min(), sample_q.min())
+    q_max = max(theoretical_q.max(), sample_q.max())
+    ax2.plot(
+        [q_min, q_max], [q_min, q_max],
+        color=ref_line_color, linestyle=ref_line_linestyle,
+        linewidth=ref_line_width,
+    )
+    ax2.set_title(titles[1], fontsize=title_size, pad=pad_title)
+    ax2.set_xlabel(xlab_right, fontsize=label_size, labelpad=pad_x)
+    ax2.set_ylabel(ylab_right, fontsize=label_size, labelpad=pad_y)
+
+    if right_yaxis:
+        ax2.yaxis.set_label_position("right")
+        ax2.yaxis.tick_right()
+        ax2.tick_params(axis="y", which="both", left=False, labelleft=False)
+    else:
+        ax2.tick_params(axis="y", which="both", right=False, labelright=False)
+
+    plt.tight_layout()
+    if render:
+        render_figure(fig, fmt=fmt, dpi=dpi)
+
+    return fig, (ax1, ax2)
+
+
+def distribution_fit_table(
+    series,
+    column_titles=(
+        "Distribución", "Parámetros", "Log-Likelihood",
+        "AIC", "BIC", "Estadístico LRT", "p-valor LRT"
+    ),
+    params=None,
+    param_labels=None,
+    decimals=2,
+    param_decimals=4,
+    render=True,
+):
+    """Compare Normal vs t-Student fit using MLE, AIC, BIC, and LRT.
+
+    Fits both distributions, calculates the information criteria, and
+    performs the Likelihood Ratio Test (LRT). The fitted parameters
+    are included in a dedicated column: mu and sigma for the Normal,
+    and only nu for the t-Student. The Normal occupies
+    the first row and the t-Student the second.
+
+    Args:
+        series (pandas.Series): Input series. NaNs are dropped before
+            fitting.
+        column_titles (tuple or list of str): Column names in the
+            order ``(distribution, params, log_likelihood, aic, bic,
+            lrt_stat, lrt_pvalue)``. Must contain exactly seven
+            strings. Defaults to ``("Distribución", "Parámetros",
+            "Log-Likelihood", "AIC", "BIC", "Estadístico LRT",
+            "p-valor LRT")``.
+        params (dict, optional): Dictionary with the fitted parameters.
+            If ``None``, they are estimated via Maximum Likelihood.
+            Structure: ``{"normal": {"mu": ..., "sigma": ...},
+            "t": {"nu": ..., "loc": ..., "scale": ...}}``.
+        param_labels (dict, optional): Custom labels for the
+            distribution parameters. Keys must be 'mu', 'sigma', and
+            'nu'. Defaults to ``{"mu": "μ", "sigma": "σ", "nu": "ν"}``.
+        decimals (int): Number of decimals for the log-likelihood,
+            AIC, BIC and LRT columns. Defaults to 2.
+        param_decimals (int): Number of decimals for the fitted
+            parameters displayed in the "Parámetros" column. Defaults
+            to 4.
+        render (bool): If ``True``, the styled table is rendered as
+            centered HTML via ``IPython.display``. Defaults to
+            ``True``.
+
+    Returns:
+        pandas.DataFrame: The plain (unstyled) results table. The
+        styled version is built internally and, when ``render=True``,
+        rendered as HTML — it is not returned.
+
+    Raises:
+        TypeError: If ``series`` has no ``dropna`` method, if
+            ``column_titles`` is not a tuple/list of seven strings, or
+            if ``render`` is not a boolean.
+        ValueError: If ``series`` is empty after dropping NaNs, or if
+            ``column_titles`` does not contain exactly seven elements.
+    """
+    if not hasattr(series, "dropna"):
+        raise TypeError(
+            "'series' must be a pandas Series or similar object with a "
+            "'dropna' method."
+        )
+
+    series = series.dropna()
+    if len(series) == 0:
+        raise ValueError("'series' is empty after dropping NaNs.")
+
+    if not isinstance(column_titles, (tuple, list)) or len(column_titles) != 7:
+        raise ValueError(
+            "'column_titles' must be a tuple/list of exactly 7 strings."
+        )
+
+    if not all(isinstance(c, str) for c in column_titles):
+        raise TypeError("All elements of 'column_titles' must be strings.")
+
+    if not isinstance(render, bool):
+        raise TypeError("'render' must be a boolean.")
+
+    if param_labels is None:
+        param_labels = _DEFAULT_PARAM_LABELS
+
+    n = len(series)
+
+    if params is not None:
+        mu_n = params["normal"]["mu"]
+        sigma_n = params["normal"]["sigma"]
+        nu_t = params["t"]["nu"]
+        loc_t = params["t"]["loc"]
+        scale_t = params["t"]["scale"]
+    else:
+        mu_n, sigma_n = stats.norm.fit(series)
+        nu_t, loc_t, scale_t = stats.t.fit(series)
+
+    ll_norm = float(np.sum(stats.norm.logpdf(series, mu_n, sigma_n)))
+    aic_norm = 2 * 2 - 2 * ll_norm
+    bic_norm = 2 * np.log(n) - 2 * ll_norm
+    
+    mu_lbl = param_labels.get('mu', 'μ')
+    sigma_lbl = param_labels.get('sigma', 'σ')
+    nu_lbl = param_labels.get('nu', 'ν')
+
+    params_norm = (
+        f"{mu_lbl} = {mu_n:.{param_decimals}f}, "
+        f"{sigma_lbl} = {sigma_n:.{param_decimals}f}"
+    )
+
+    ll_t = float(np.sum(stats.t.logpdf(series, nu_t, loc_t, scale_t)))
+    aic_t = 2 * 3 - 2 * ll_t
+    bic_t = 3 * np.log(n) - 2 * ll_t
+    
+    # AHORA SOLO MUESTRA EL NU (GRADOS DE LIBERTAD) EN LA TABLA
+    params_t = f"{nu_lbl} = {nu_t:.{param_decimals}f}"
+
+    lr_stat = 2 * (ll_t - ll_norm)
+    lr_p = float(stats.chi2.sf(lr_stat, df=1))
+
+    df_fit = pd.DataFrame({
+        column_titles[0]: ["Normal", "t-Student"],
+        column_titles[1]: [params_norm, params_t],
+        column_titles[2]: [ll_norm, ll_t],
+        column_titles[3]: [aic_norm, aic_t],
+        column_titles[4]: [bic_norm, bic_t],
+        column_titles[5]: ["-", lr_stat],
+        column_titles[6]: ["-", lr_p],
+    })
+
+    format_dict = {
+        column_titles[2]: lambda x: _smart_format(x, f"{{:,.{decimals}f}}"),
+        column_titles[3]: lambda x: _smart_format(x, f"{{:,.{decimals}f}}"),
+        column_titles[4]: lambda x: _smart_format(x, f"{{:,.{decimals}f}}"),
+        column_titles[5]: lambda x: _smart_format(x, f"{{:,.{decimals}f}}"),
+        column_titles[6]: lambda x: _format_apa_pvalue(x) if isinstance(x, (int, float)) else x,
+    }
+
+    styled_fit = (
+        df_fit.style
+        .hide(axis="index")
+        .set_table_styles(_table_style_rules())
+        .format(format_dict)
+    )
+
+    if render:
+        _render_styled(styled_fit)
+
+    return df_fit
+
+
 def plot_series_and_annual_boxplot(
     series,
     titles=("Time series", "Annual distribution"),
@@ -696,85 +935,7 @@ def plot_series_and_annual_boxplot(
     fmt="svg",
     dpi=100,
 ):
-    """Plot a univariate series over time alongside its annual boxplot.
-
-    Draws the raw series as a line plot on the left and the distribution
-    of the series grouped by calendar year as a boxplot on the right,
-    applying a consistent, publication-ready style (black lines, thin
-    black spines, no y-axis on the right subplot). The figure is
-    optionally passed to ``render_figure`` for inline rendering.
-
-    Args:
-        series (pandas.Series): Input time series. Must have a
-            ``DatetimeIndex``. NaNs are dropped before plotting.
-        titles (tuple or list of str): Titles for the left (line) and
-            right (boxplot) subplots, respectively. Must contain exactly
-            two strings. Defaults to ``("Time series",
-            "Annual distribution")``.
-        xlab (tuple or list of str): X-axis labels for the left (line)
-            and right (boxplot) subplots. Must contain exactly two
-            strings. Defaults to ``("Date", "Year")``.
-        ylab (str): Y-axis label for the left subplot. The right subplot
-            hides its y-axis. Defaults to ``"Value"``.
-        pads (tuple of float): Padding values ``(pad_x, pad_y, pad_title)``
-            applied to the x-axis labels, the y-axis label and the
-            titles, respectively. Defaults to ``(9, 9, 12)``.
-        label_size (float): Font size for the axis labels. Defaults to 12.
-        title_size (float): Font size for the subplot titles. Defaults to
-            12.
-        tick_size (float): Font size for the tick labels. Defaults to 11.
-        line_color (str): Color of the line in the left subplot. Defaults
-            to ``"black"``.
-        line_width (float): Width of the line in the left subplot.
-            Defaults to 1.0.
-        box_width (float): Width of each box in the right subplot.
-            Defaults to 0.6.
-        box_facecolor (str): Face color of the boxes. Defaults to
-            ``"white"``.
-        box_xpad (float): Padding added to the left and right x-limits of
-            the boxplot subplot, in year units. Defaults to 0.8.
-        year_locator_interval (int): Interval, in years, between major
-            x-axis ticks on the left subplot. Defaults to 2.
-        year_formatter (str): ``strftime`` format string for the left
-            subplot's x-axis. Defaults to ``"%Y"``.
-        box_tick_step (int): Show every ``box_tick_step``-th year as a
-            tick label on the right subplot (starting from the first
-            year present in the data). Defaults to 2.
-        ylim (tuple of float, optional): ``(ymin, ymax)`` limits shared
-            by both subplots. If ``None``, matplotlib defaults are used.
-        y_step (float, optional): If provided, sets a ``MultipleLocator``
-            with this step on the y-axis of the left subplot (shared with
-            the right one because of ``sharey=True``). If ``None``,
-            matplotlib chooses the ticks. Defaults to ``None``.
-        y_format (str, optional): If provided, a ``printf``-style format
-            string (e.g. ``"%.2f"``) applied to the y-axis ticks via
-            ``FormatStrFormatter``. If ``None``, matplotlib default
-            formatting is used. Defaults to ``None``.
-        figsize (tuple of float): Figure size in inches. Defaults to
-            ``(8, 4)``.
-        render (bool): If ``True``, the figure is passed to
-            ``render_figure`` for inline rendering. Defaults to ``True``.
-        fmt ({"svg", "png"}): Output format forwarded to ``render_figure``
-            when ``render=True``. Defaults to ``"svg"`` (vector).
-        dpi (int): Resolution forwarded to ``render_figure``; only takes
-            effect when ``fmt="png"``. Defaults to ``100``.
-
-    Returns:
-        tuple: ``(fig, (ax1, ax2))`` with the matplotlib figure and the
-        two axes (line plot on the left, boxplot on the right).
-
-    Raises:
-        TypeError: If ``series`` has no ``dropna`` method, if its index
-            is not a ``DatetimeIndex``, if ``titles``, ``xlab`` or
-            ``figsize`` is not a tuple/list of the right length, if
-            ``ylim`` is not ``None`` or a tuple/list of length 2, or if
-            ``y_format`` is not ``None`` or a string.
-        ValueError: If ``series`` is empty after dropping NaNs, if
-            ``titles`` or ``xlab`` does not contain exactly two strings,
-            if ``year_locator_interval`` or ``box_tick_step`` is not a
-            positive integer, or if ``y_step`` is not ``None`` or a
-            positive number.
-    """
+    """Plot a univariate series over time alongside its annual boxplot."""
     if not hasattr(series, "dropna"):
         raise TypeError(
             "'series' must be a pandas Series or similar object with a "
@@ -875,89 +1036,7 @@ def plot_ts_boxplots_by_calendar(
     fmt="svg",
     dpi=100,
 ):
-    """Plot two calendar-based boxplots of a univariate time series.
-
-    Splits a univariate time series into two calendar groupings (e.g. by
-    calendar month and by day of the week), draws one boxplot per group
-    on each panel, and applies a consistent, publication-ready style
-    (white boxes, black edges, thin black spines). The right panel hides
-    its y-axis. The figure is optionally passed to ``render_figure`` for
-    inline rendering.
-
-    Args:
-        series (pandas.Series): Input time series. Must have a
-            ``DatetimeIndex``. NaNs are dropped before plotting.
-        groups (tuple or list of dict): Exactly two grouper specs, one
-            per panel. Each spec must be a dict with the keys ``"by"``
-            (callable or array-like), ``"positions"``, ``"labels"``,
-            ``"xlabel"`` and ``"title"``.
-
-            Example::
-
-                groups=(
-                    {
-                        "by": lambda idx: idx.month,
-                        "positions": list(range(1, 13)),
-                        "labels": [str(m) for m in range(1, 13)],
-                        "xlabel": "Mes",
-                        "title": "Distribución mensual",
-                    },
-                    {
-                        "by": lambda idx: idx.dayofweek,
-                        "positions": [0, 1, 2, 3, 4],
-                        "labels": ["Lun", "Mar", "Mié", "Jue", "Vie"],
-                        "xlabel": "Día de la semana",
-                        "title": "Distribución por día de la semana",
-                    },
-                )
-        ylab (str): Y-axis label for the left panel. The right panel
-            hides its y-axis. Defaults to ``"Value"``.
-        pads (tuple of float): Padding values ``(pad_x, pad_y, pad_title)``
-            applied to the x-axis labels, the y-axis label and the
-            titles, respectively. Defaults to ``(9, 9, 12)``.
-        label_size (float): Font size for the axis labels. Defaults to 12.
-        title_size (float): Font size for the panel titles. Defaults to
-            12.
-        tick_size (float): Font size for the tick labels. Defaults to 11.
-        box_width (float): Width of each box. Defaults to 0.6.
-        box_facecolor (str): Face color of the boxes. Defaults to
-            ``"white"``.
-        box_xpad (float): Padding added to the left and right x-limits of
-            each panel, in position units. Defaults to 0.8.
-        ylim (tuple of float, optional): ``(ymin, ymax)`` limits for the
-            left panel. If ``None``, matplotlib defaults are used.
-        y_step (float, optional): If provided, sets a ``MultipleLocator``
-            with this step on the y-axis of the left panel.
-        y_format (str, optional): If provided, a ``printf``-style format
-            string (e.g. ``"%.2f"``) applied to the y-axis ticks of the
-            left panel.
-        sharey (bool): If ``True``, both panels share the y-axis (the
-            right panel still hides its tick labels). Defaults to
-            ``False``.
-        figsize (tuple of float): Figure size in inches. Defaults to
-            ``(8, 4)``.
-        render (bool): If ``True``, the figure is passed to
-            ``render_figure`` for inline rendering. Defaults to ``True``.
-        fmt ({"svg", "png"}): Output format forwarded to ``render_figure``
-            when ``render=True``. Defaults to ``"svg"`` (vector).
-        dpi (int): Resolution forwarded to ``render_figure``; only takes
-            effect when ``fmt="png"``. Defaults to ``100``.
-
-    Returns:
-        tuple: ``(fig, (ax1, ax2))`` with the matplotlib figure and the
-        two axes.
-
-    Raises:
-        TypeError: If ``series`` has no ``dropna`` method, if its index
-            is not a ``DatetimeIndex``, if ``groups`` is not a tuple/list
-            of two dicts, if any spec is missing a required key, if
-            ``figsize`` is not a tuple/list of length 2, if ``ylim`` is
-            not ``None`` or a tuple/list of length 2, or if ``y_format``
-            is not ``None`` or a string.
-        ValueError: If ``series`` is empty after dropping NaNs, if
-            ``y_step`` is not ``None`` or a positive number, or if a
-            grouper's ``by`` array does not match the series length.
-    """
+    """Plot two calendar-based boxplots of a univariate time series."""
     if not hasattr(series, "dropna"):
         raise TypeError(
             "'series' must be a pandas Series or similar object with a "
@@ -1045,42 +1124,7 @@ def dataframe_integrity_table(
     decimals=0,
     render=True,
 ):
-    """Summarize a DataFrame's structure, dtypes and missing values.
-
-    Builds a small integrity table with one row per column in ``df``,
-    reporting the column name, its pandas dtype as a string, and the
-    number of missing values. Applies a consistent, publication-ready
-    style (centered cells, thin black borders, left-aligned first
-    column). Optionally renders the styled table as centered HTML
-    (useful in Jupyter notebooks).
-
-    Args:
-        df (pandas.DataFrame): Input DataFrame. Must have a ``dtypes``
-            attribute and an ``isnull`` method.
-        column_titles (tuple or list of str): Column names for the output
-            table in the order ``(variable, dtype, missing)``. Must
-            contain exactly three strings. Defaults to
-            ``("Variable", "Dtype", "Missing Values")``.
-        decimals (int): Number of decimals used to format the missing
-            values column. Since counts are integers, the default of
-            ``0`` is usually what you want. Defaults to 0.
-        render (bool): If ``True``, the styled table is rendered as
-            centered HTML via ``IPython.display``. Defaults to ``True``.
-
-    Returns:
-        pandas.DataFrame: The plain (unstyled) results table. The styled
-        version is built internally and, when ``render=True``, rendered
-        as HTML — it is not returned.
-
-    Raises:
-        TypeError: If ``df`` is not a pandas DataFrame, if
-            ``column_titles`` is not a tuple/list of three strings, if
-            ``decimals`` is not an int, or if ``render`` is not a
-            boolean.
-        ValueError: If ``column_titles`` does not contain exactly three
-            elements, if any element of ``column_titles`` is not a
-            string, or if ``decimals`` is negative.
-    """
+    """Summarize a DataFrame's structure, dtypes and missing values."""
     if not isinstance(df, pd.DataFrame):
         raise TypeError("'df' must be a pandas DataFrame.")
 
@@ -1142,65 +1186,7 @@ def descriptive_stats_table(
     round_threshold=5e-5,
     render=True,
 ):
-    """Build a descriptive-statistics table for every numeric column.
-
-    Computes a set of summary statistics (count, mean, standard
-    deviation, minimum, quartiles, median, maximum and IQR) for each
-    column of ``df``, reshapes the result into a long table with one row
-    per statistic and one column per input variable, and applies a
-    consistent, publication-ready style. Horizontal alignment follows
-    the shared style rules (first column left-aligned, every other
-    column centered); every cell is additionally centered vertically.
-    Small absolute values are rounded to zero to avoid floating-point
-    noise, and the count row is formatted as integers while the rest use
-    fixed decimals.
-
-    Args:
-        df (pandas.DataFrame): Input DataFrame with numeric columns.
-            Non-numeric columns will raise a pandas error during
-            aggregation.
-        column_labels (tuple or list of str, optional): Display names for
-            the DataFrame columns, in the same order as ``df.columns``.
-            Must have the same length as the number of columns in ``df``.
-            If ``None``, the original column names are used.
-        param_col_title (str): Header of the first column, which lists
-            the statistic names. Defaults to ``"Parameter"``.
-        row_labels (tuple or list of str): Display names for the nine
-            statistics, in the order ``(count, mean, std, min, q1,
-            median, q3, max, iqr)``. Must contain exactly nine strings.
-            Defaults to ``("Count", "Mean", "Std. Dev.", "Min", "Q1",
-            "Median", "Q3", "Max", "IQR")``.
-        int_row_indices (tuple or list of int): Indices (into
-            ``row_labels``) of the rows that should be formatted as
-            integers. Defaults to ``(0,)`` (the count row).
-        int_format (str): Format string used for the rows listed in
-            ``int_row_indices``. Defaults to ``"{:,.0f}"``.
-        float_format (str): Format string used for all other rows.
-            Defaults to ``"{:,.4f}"``.
-        round_threshold (float): Absolute threshold below which values
-            are replaced by ``0.0`` before formatting. Set to ``0`` to
-            disable. Defaults to ``5e-5``.
-        render (bool): If ``True``, the styled table is rendered as
-            centered HTML via ``IPython.display``. Defaults to ``True``.
-
-    Returns:
-        pandas.DataFrame: The long-format results table (unstyled). The
-        styled version is built internally and, when ``render=True``,
-        rendered as HTML — it is not returned.
-
-    Raises:
-        TypeError: If ``df`` is not a pandas DataFrame, if
-            ``column_labels`` is not ``None`` or a tuple/list of strings,
-            if ``param_col_title`` is not a string, if ``row_labels`` is
-            not a tuple/list of nine strings, if ``int_row_indices`` is
-            not a tuple/list of ints, if ``int_format`` or
-            ``float_format`` is not a string, or if ``render`` is not a
-            boolean.
-        ValueError: If ``column_labels`` does not match the number of
-            columns in ``df``, if ``row_labels`` does not contain exactly
-            nine elements, if ``int_row_indices`` contains an index
-            outside ``range(9)``, or if ``round_threshold`` is negative.
-    """
+    """Build a descriptive-statistics table for every numeric column."""
     if not isinstance(df, pd.DataFrame):
         raise TypeError("'df' must be a pandas DataFrame.")
 
@@ -1336,106 +1322,7 @@ def plot_wavelet_decomposition(
     fmt="svg",
     dpi=100,
 ):
-    """Plot a multi-level wavelet decomposition from pre-computed coefficients.
-
-    Takes the output of ``pywt.wavedec`` (plus the original DatetimeIndex
-    and, optionally, the original length) and reconstructs one or more
-    coefficient bands, plotting one band per panel. Each entry of
-    ``levels`` describes one panel:
-
-    - an ``int`` ``k`` means the panel reconstructs the signal using only
-      ``coeffs[k]`` (a single approximation or detail level);
-    - a ``tuple`` of ints ``(a, b, ...)`` means the panel collapses those
-      coefficients together (reconstructs using only those details).
-
-    For example, ``levels=(0, 1)`` yields two panels (approximation and
-    first detail), ``levels=((5, 6, 7),)`` yields a single panel that
-    collapses the three finest details, and ``levels=(0, 1, 2, (3, 4))``
-    yields four panels. The figure is optionally passed to
-    ``render_figure`` for inline rendering.
-
-    Args:
-        coeffs (list or tuple of numpy.ndarray): Output of
-            ``pywt.wavedec``. Typically
-            ``[cA_n, cD_n, cD_{n-1}, ..., cD_1]``.
-        index (pandas.DatetimeIndex): Datetime index of the original
-            series, used as the x-axis. Must have the same length as the
-            original series (``n_obs``).
-        levels (tuple or list): One entry per panel. Each entry is either
-            an ``int`` (single coefficient index) or a ``tuple`` of ints
-            (collapse those indices into one panel).
-        panel_titles (tuple or list of str): Titles for each panel. Must
-            have the same length as ``levels``.
-        ylab (str or tuple/list of str): Y-axis label. If a string, it is
-            applied to every panel. If a tuple/list, must have the same
-            length as ``levels``.
-        wavelet (str): Wavelet name, needed by ``pywt.waverec`` to
-            reconstruct. Defaults to ``"db4"``.
-        n_obs (int, optional): Original length of the series, used to
-            truncate each reconstruction to the same length. If ``None``,
-            defaults to ``len(index)``.
-        xlab (str): X-axis label applied only to the bottom-most panels.
-            Defaults to ``"Date"``.
-        pads (tuple of float): Padding values ``(pad_x, pad_y, pad_title)``
-            applied to the x-axis labels, the y-axis labels and the
-            titles, respectively. Defaults to ``(9, 9, 12)``.
-        label_size (float): Font size for the axis labels. Defaults to 12.
-        title_size (float): Font size for the panel titles. Defaults to
-            12.
-        tick_size (float): Font size for the tick labels. Defaults to 11.
-        line_width (float): Width of the plotted lines. Defaults to 1.0.
-        title_loc (str): Title alignment: ``"left"``, ``"center"`` or
-            ``"right"``. Defaults to ``"left"``.
-        year_locator_interval (int): Interval, in years, between major
-            x-axis ticks. Defaults to 2.
-        year_formatter (str): ``strftime`` format string for the x-axis.
-            Defaults to ``"%Y"``.
-        ylim (tuple or list of tuples, optional): Y-axis limits. A single
-            ``(ymin, ymax)`` tuple applies to all panels. A list of
-            tuples applies per panel. If ``None``, matplotlib defaults
-            are used.
-        y_step (float or tuple/list, optional): Step for a
-            ``MultipleLocator`` on the y-axis. Same broadcasting rules as
-            ``ylim``.
-        y_format (str or tuple/list, optional): ``printf``-style format
-            string for the y-axis ticks. Same broadcasting rules as
-            ``ylim``.
-        yticks (array-like or tuple/list, optional): Explicit y-axis tick
-            positions. A flat sequence applies to all panels. A list of
-            sequences applies per panel.
-        right_yaxis (bool): If ``True`` and the layout has two columns,
-            moves the y-axis label and ticks of the right column to the
-            right side. Defaults to ``False``.
-        figsize (tuple of float, optional): Figure size in inches. If
-            ``None``, a default is chosen based on the number of panels.
-        hspace (float): Vertical space between panels. Defaults to 0.30.
-            For the 4-panel 2x2 grid this value is automatically adjusted
-            so that the absolute vertical gap matches the one produced by
-            the 2-panel stack.
-        wspace (float): Horizontal space between panels. Defaults to 0.08.
-        render (bool): If ``True``, the figure is passed to
-            ``render_figure`` for inline rendering. Defaults to ``True``.
-        fmt ({"svg", "png"}): Output format forwarded to ``render_figure``
-            when ``render=True``. Defaults to ``"svg"`` (vector).
-        dpi (int): Resolution forwarded to ``render_figure``; only takes
-            effect when ``fmt="png"``. Defaults to ``100``.
-
-    Returns:
-        tuple: ``(fig, axes)`` where ``fig`` is the matplotlib figure and
-        ``axes`` is a flat numpy array of ``Axes``, one per panel.
-
-    Raises:
-        TypeError: If ``coeffs`` is not a list/tuple of numpy arrays, if
-            ``index`` is not a ``DatetimeIndex``, if ``levels`` contains
-            an element that is neither an int nor a tuple/list of ints,
-            if ``panel_titles`` or ``ylab`` (when a sequence) has the
-            wrong length or contains non-string elements, or if
-            ``figsize`` is not ``None`` or a tuple/list of length 2.
-        ValueError: If ``levels`` is empty, if a coefficient index is
-            negative or exceeds ``len(coeffs) - 1``, if ``n_obs`` is not
-            ``None`` or a positive integer, or if ``n_obs`` exceeds the
-            length of ``index``.
-    """
+    """Plot a multi-level wavelet decomposition from pre-computed coefficients."""
     if not isinstance(coeffs, (list, tuple)) or len(coeffs) == 0:
         raise TypeError(
             "'coeffs' must be a non-empty list or tuple of numpy arrays "
@@ -1701,94 +1588,7 @@ def plot_rolling_smoothing_panels(
     fmt="svg",
     dpi=100,
 ):
-    """Plot a series plus its rolling means in a 2x2 grid.
-
-    Draws the raw series in the top-left panel and one centered rolling
-    mean per window in the remaining panels. The number of panels is
-    fixed at four, so ``windows`` must contain exactly three values
-    (window for the top-right, bottom-left and bottom-right panels, in
-    that order). The figure is optionally passed to ``render_figure`` for
-    inline rendering.
-
-    Args:
-        series (pandas.Series): Input time series. Must have a
-            ``DatetimeIndex``. NaNs are dropped before plotting.
-        windows (tuple or list of int): Three rolling window sizes, one
-            per smoothed panel. Must contain exactly three positive
-            integers. Defaults to ``(5, 10, 21)``.
-        titles (tuple or list of str, optional): Titles for the four
-            panels in the order ``(raw, w0, w1, w2)``. Must contain
-            exactly four strings. If ``None``, titles are auto-generated
-            from ``ylab``.
-        ylab (str): Y-axis label, applied to every panel. Also used to
-            auto-generate titles when ``titles`` is ``None``. Must be
-            provided if ``titles`` is ``None``.
-        xlab (str): X-axis label applied only to the bottom row of
-            panels. Defaults to ``"Date"``.
-        center (bool): If ``True``, rolling means use centered windows
-            (``center=True`` in ``pandas.Series.rolling``). Defaults to
-            ``True``.
-        pads (tuple of float): Padding values ``(pad_x, pad_y, pad_title)``
-            applied to the x-axis labels, the y-axis labels and the
-            titles, respectively. Defaults to ``(9, 9, 12)``.
-        label_size (float): Font size for the axis labels. Defaults to 12.
-        title_size (float): Font size for the panel titles. Defaults to
-            11.
-        tick_size (float): Font size for the tick labels. Defaults to 11.
-        line_width (float): Width of the plotted lines. Defaults to 1.0.
-        title_loc (str): Title alignment: ``"left"``, ``"center"`` or
-            ``"right"``. Defaults to ``"center"``.
-        year_locator_interval (int): Interval, in years, between major
-            x-axis ticks. Defaults to 2.
-        year_formatter (str): ``strftime`` format string for the x-axis.
-            Defaults to ``"%Y"``.
-        ylim (tuple or list of tuples, optional): Y-axis limits. A single
-            ``(ymin, ymax)`` tuple applies to all panels. A list of four
-            tuples applies per panel. If ``None``, matplotlib defaults
-            are used.
-        y_step (float or tuple/list, optional): Step for a
-            ``MultipleLocator`` on the y-axis. Same broadcasting rules as
-            ``ylim``.
-        y_format (str or tuple/list, optional): ``printf``-style format
-            string for the y-axis ticks. Same broadcasting rules as
-            ``ylim``.
-        yticks (array-like or tuple/list, optional): Explicit y-axis tick
-            positions. A flat sequence applies to all panels. A list of
-            four sequences (each a tuple, list, numpy array or ``None``)
-            applies per panel.
-        right_yaxis (bool): If ``True``, moves the y-axis label and ticks
-            of the right column to the right side. Defaults to ``True``.
-        figsize (tuple of float): Figure size in inches. Defaults to
-            ``(9, 6)``.
-        hspace (float): Vertical space between the two rows. Defaults to
-            0.50.
-        wspace (float): Horizontal space between the two columns.
-            Defaults to 0.08.
-        render (bool): If ``True``, the figure is passed to
-            ``render_figure`` for inline rendering. Defaults to ``True``.
-        fmt ({"svg", "png"}): Output format forwarded to ``render_figure``
-            when ``render=True``. Defaults to ``"svg"`` (vector).
-        dpi (int): Resolution forwarded to ``render_figure``; only takes
-            effect when ``fmt="png"``. Defaults to ``100``.
-
-    Returns:
-        tuple: ``(fig, axes)`` where ``fig`` is the matplotlib figure and
-        ``axes`` is a flat numpy array of four ``Axes``, in row-major
-        order (raw, w0, w1, w2).
-
-    Raises:
-        TypeError: If ``series`` has no ``dropna`` method, if its index
-            is not a ``DatetimeIndex``, if ``windows`` is not a
-            tuple/list of three ints, if ``titles`` (when provided) is
-            not a tuple/list of four strings, if ``ylab`` is not a string
-            when ``titles`` is ``None``, if ``figsize`` is not a
-            tuple/list of length 2, or if ``y_format`` is not ``None`` or
-            a string.
-        ValueError: If ``series`` is empty after dropping NaNs, if any
-            window is not a positive integer, if any window is larger
-            than the series length, or if ``y_step`` is not ``None`` or a
-            positive number.
-    """
+    """Plot a series plus its rolling means in a 2x2 grid."""
     if not hasattr(series, "dropna"):
         raise TypeError(
             "'series' must be a pandas Series or similar object with a "
@@ -1954,65 +1754,7 @@ def correlation_windows_table(
     decimals=3,
     render=True,
 ):
-    """Correlate two series across rolling-mean windows and tabulate results.
-
-    Computes pairwise correlations between ``series_x`` and ``series_y``,
-    both on the raw series and on centered rolling means of each at the
-    requested windows, and returns a publication-ready table with one row
-    per window and one column per correlation method. Correlations are
-    formatted with significance stars, optionally Bonferroni-adjusted
-    across the number of rows (windows). Optionally renders the styled
-    table as centered HTML (useful in Jupyter notebooks).
-
-    Args:
-        series_x (pandas.Series): First input series.
-        series_y (pandas.Series): Second input series.
-        windows (tuple or list of int): Rolling window sizes. Defaults to
-            ``(5, 10, 21)``.
-        window_labels (tuple or list of str, optional): Row labels, one
-            for the raw (unsmoothed) series plus one per window. Must
-            contain ``len(windows) + 1`` strings. If ``None``, defaults
-            to ``("Unsmoothed", "w=5", "w=10", ...)``.
-        column_titles (tuple or list of str, optional): Column names, one
-            for the window label plus one per method. Must contain
-            ``1 + len(methods)`` strings. If ``None``, defaults to
-            ``("Window", "Pearson", "Spearman", ...)`` (methods
-            capitalized).
-        methods (tuple or list of str): Correlation methods to compute.
-            Supported values are ``"pearson"``, ``"spearman"`` and
-            ``"kendall"``. Defaults to ``("pearson", "spearman")``.
-        star_levels (tuple or list of (float, str) pairs): Significance
-            thresholds and their associated stars, in any order. Each
-            pair is ``(threshold, stars)`` with ``threshold`` in
-            ``(0, 1)``. Defaults to
-            ``((0.001, "***"), (0.01, "**"), (0.05, "*"))``.
-        bonferroni (bool): If ``True``, each threshold in ``star_levels``
-            is divided by the number of rows (number of windows tested,
-            including the raw one) before evaluating significance.
-            Defaults to ``True``.
-        decimals (int): Number of decimals used to format the correlation
-            coefficients. Defaults to ``3``.
-        render (bool): If ``True``, the styled table is rendered as
-            centered HTML via ``IPython.display``. Defaults to ``True``.
-
-    Returns:
-        pandas.DataFrame: The plain (unstyled) results table. The styled
-        version is built internally and, when ``render=True``, rendered
-        as HTML — it is not returned.
-
-    Raises:
-        TypeError: If ``series_x`` or ``series_y`` is not a pandas
-            Series, if ``windows`` or ``methods`` is not a non-empty
-            tuple/list, if ``window_labels`` or ``column_titles`` (when
-            provided) has the wrong length or non-string elements, if
-            ``star_levels`` is not a tuple/list of (number, string)
-            pairs, if ``bonferroni`` or ``render`` is not a boolean, or
-            if any of the pair elements is of the wrong type.
-        ValueError: If any window is not a positive integer, if any
-            method is not supported, if any threshold in ``star_levels``
-            is not in ``(0, 1)``, or if ``decimals`` is not a
-            non-negative integer.
-    """
+    """Correlate two series across rolling-mean windows and tabulate results."""
     if not isinstance(series_x, pd.Series):
         raise TypeError("'series_x' must be a pandas Series.")
 
@@ -2194,106 +1936,7 @@ def plot_ccf_panels(
     fmt="svg",
     dpi=100,
 ):
-    """Plot cross-correlation functions in a 2x2 grid.
-
-    Draws the cross-correlation function (CCF) between two series for
-    four variants: the raw (unsmoothed) pair and three centered
-    rolling-mean versions at the requested windows. Each panel shows the
-    stem plot of the CCF, a horizontal zero line and symmetric
-    confidence bounds at ``1.96 / sqrt(n)``. The top-right, bottom-left
-    and bottom-right panels use the smoothed variants in the order given
-    by ``windows``. The figure is optionally passed to ``render_figure``
-    for inline rendering.
-
-    Args:
-        series_x (pandas.Series): First input series.
-        series_y (pandas.Series): Second input series.
-        windows (tuple or list of int): Three rolling window sizes, one
-            per smoothed panel. Must contain exactly three positive
-            integers. Defaults to ``(5, 10, 21)``.
-        max_lag (int): Maximum absolute lag shown on the x-axis. Positive
-            integer. Defaults to 20.
-        normalize (bool): If ``True``, the CCF values are normalized by
-            the product of the two series' standard deviations, yielding
-            values in ``[-1, 1]``. If ``False`` (default), raw
-            cross-covariance values are shown, matching the unnormalized
-            ``statsmodels.tsa.stattools.ccf`` output.
-        titles (tuple or list of str, optional): Titles for the four
-            panels in the order ``(raw, w0, w1, w2)``. Must contain
-            exactly four strings. If ``None``, titles are auto-generated
-            from ``windows``.
-        ylab (str): Y-axis label applied to the left column. The right
-            column hides its y-axis by default. Defaults to
-            ``"Cross-correlation"``.
-        xlab (str): X-axis label applied only to the bottom row of
-            panels. Defaults to ``"Lag"``.
-        center (bool): If ``True``, rolling means use centered windows.
-            Defaults to ``True``.
-        pads (tuple of float): Padding values ``(pad_x, pad_y, pad_title)``
-            applied to the x-axis labels, the y-axis labels and the
-            titles, respectively. Defaults to ``(11, 11, 12)``.
-        label_size (float): Font size for the axis labels. Defaults to 12.
-        title_size (float): Font size for the panel titles. Defaults to
-            13.
-        tick_size (float): Font size for the tick labels. Defaults to 11.
-        stem_width (float): Width of the vertical stems. Defaults to 1.0.
-        zero_line_width (float): Width of the horizontal zero line.
-            Defaults to 0.5.
-        conf_color (str): Color of the confidence-bound dashed lines.
-            Defaults to ``"blue"``.
-        conf_linestyle (str): Line style of the confidence bounds.
-            Defaults to ``"--"``.
-        conf_linewidth (float): Width of the confidence-bound lines.
-            Defaults to 1.0.
-        title_loc (str): Title alignment: ``"left"``, ``"center"`` or
-            ``"right"``. Defaults to ``"center"``.
-        xlim (tuple of float, optional): ``(xmin, xmax)`` limits for the
-            x-axis of all panels. If ``None``, matplotlib defaults are
-            used.
-        ylim (tuple of float, optional): ``(ymin, ymax)`` limits for the
-            y-axis of all panels. Defaults to ``(-0.001, 1.00)``.
-        y_step (float, optional): If provided, sets a ``MultipleLocator``
-            with this step on the y-axis. Defaults to 0.1.
-        y_format (str, optional): If provided, a ``printf``-style format
-            string for the y-axis ticks. If ``None``, default formatting
-            is used.
-        yticks (array-like, optional): Explicit y-axis tick positions for
-            all panels. If ``None``, matplotlib chooses them (subject to
-            ``y_step``).
-        hide_right_yaxis (bool): If ``True``, the right column hides its
-            y-axis (ticks and label), matching the reference style. If
-            ``False``, both columns show their y-axes. Defaults to
-            ``True``.
-        figsize (tuple of float): Figure size in inches. Defaults to
-            ``(10, 8)``.
-        hspace (float): Vertical space between the two rows. Defaults to
-            0.30.
-        wspace (float): Horizontal space between the two columns.
-            Defaults to 0.08.
-        render (bool): If ``True``, the figure is passed to
-            ``render_figure`` for inline rendering. Defaults to ``True``.
-        fmt ({"svg", "png"}): Output format forwarded to ``render_figure``
-            when ``render=True``. Defaults to ``"svg"`` (vector).
-        dpi (int): Resolution forwarded to ``render_figure``; only takes
-            effect when ``fmt="png"``. Defaults to ``100``.
-
-    Returns:
-        tuple: ``(fig, axes)`` where ``fig`` is the matplotlib figure and
-        ``axes`` is a flat numpy array of four ``Axes`` in row-major
-        order (raw, w0, w1, w2).
-
-    Raises:
-        TypeError: If ``series_x`` or ``series_y`` is not a pandas
-            Series, if ``windows`` is not a tuple/list of three ints, if
-            ``titles`` (when provided) is not a tuple/list of four
-            strings, if ``max_lag`` is not an int, if ``figsize`` is not
-            a tuple/list of length 2, or if ``y_format`` is not ``None``
-            or a string.
-        ValueError: If any window is not a positive integer, if any
-            window is larger than the aligned series length, if
-            ``max_lag`` is not positive, or if ``y_step`` is not ``None``
-            or a positive number.
-    """
+    """Plot cross-correlation functions in a 2x2 grid."""
     if not isinstance(series_x, pd.Series):
         raise TypeError("'series_x' must be a pandas Series.")
 
@@ -2475,89 +2118,7 @@ def plot_train_test_split(
     fmt="svg",
     dpi=100,
 ):
-    """Plot a time series split into train and test regions.
-
-    Splits ``df`` at ``train_ratio`` of its length, draws the series as a
-    line on the same axis, adds a vertical dashed line at the split
-    point, shades the test region in light gray and annotates both
-    regions with text labels placed just above the axis. Applies a
-    consistent, publication-ready style (black lines, thin black spines).
-    The figure is optionally passed to ``render_figure`` for inline
-    rendering.
-
-    Args:
-        df (pandas.DataFrame): Input DataFrame. Must have a
-            ``DatetimeIndex`` and contain ``column`` as one of its
-            columns. It is sorted by index internally before splitting.
-        column (str): Name of the column to plot.
-        train_ratio (float): Fraction of the rows used for training. Must
-            be in ``(0, 1)``. The split index is computed as
-            ``int(len(df) * train_ratio)``. Defaults to 0.70.
-        title (str): Title of the plot. Defaults to ``"Time series"``.
-        xlab (str): X-axis label. Defaults to ``"Date"``.
-        ylab (str): Y-axis label. Defaults to ``"Value"``.
-        train_label (str): Text label for the training region. Defaults
-            to ``"Train"``.
-        test_label (str): Text label for the test region. Defaults to
-            ``"Test"``.
-        label_y (float): Vertical position (in axes coordinates) of the
-            region labels. Defaults to 0.80.
-        split_color (str): Color of the vertical split line. Defaults to
-            ``"black"``.
-        split_linestyle (str): Line style of the vertical split line.
-            Defaults to ``":"``.
-        split_linewidth (float): Width of the vertical split line.
-            Defaults to 1.0.
-        split_alpha (float): Alpha of the vertical split line. Defaults
-            to 0.8.
-        shade_color (str): Color of the shaded test region. Defaults to
-            ``"lightgray"``.
-        shade_alpha (float): Alpha of the shaded test region. Defaults
-            to 0.3.
-        shade_extend (pandas.Timedelta): Extra time added to the right
-            edge of the shaded region beyond the last observation.
-            Defaults to 300 days.
-        line_color (str): Color of the plotted line. Defaults to
-            ``"black"``.
-        line_width (float): Width of the plotted line. Defaults to 1.0.
-        pads (tuple of float): Padding values ``(pad_x, pad_y, pad_title)``
-            applied to the x-axis label, the y-axis label and the title,
-            respectively. Defaults to ``(9, 9, 12)``.
-        label_size (float): Font size for the axis labels. Defaults to
-            10.
-        title_size (float): Font size for the title. Defaults to 12.
-        tick_size (float): Font size for the tick labels. Defaults to 9.
-        title_loc (str): Title alignment: ``"left"``, ``"center"`` or
-            ``"right"``. Defaults to ``"center"``.
-        year_locator_interval (int): Interval, in years, between major
-            x-axis ticks. Defaults to 2.
-        year_formatter (str): ``strftime`` format string for the x-axis.
-            Defaults to ``"%Y"``.
-        figsize (tuple of float): Figure size in inches. Defaults to
-            ``(7, 3.5)``.
-        render (bool): If ``True``, the figure is passed to
-            ``render_figure`` for inline rendering. Defaults to ``True``.
-        fmt ({"svg", "png"}): Output format forwarded to ``render_figure``
-            when ``render=True``. Defaults to ``"svg"`` (vector).
-        dpi (int): Resolution forwarded to ``render_figure``; only takes
-            effect when ``fmt="png"``. Defaults to ``100``.
-
-    Returns:
-        tuple: ``(fig, ax, df_train, df_test)`` where ``fig`` is the
-        matplotlib figure, ``ax`` is the ``Axes``, and ``df_train`` and
-        ``df_test`` are the two slices of the input DataFrame (with the
-        index sorted).
-
-    Raises:
-        TypeError: If ``df`` is not a pandas DataFrame, if its index is
-            not a ``DatetimeIndex``, if ``column`` is not a string, if
-            ``shade_extend`` is not a ``pd.Timedelta``, or if ``figsize``
-            is not a tuple/list of length 2.
-        ValueError: If ``df`` is empty, if ``column`` is not in ``df``,
-            if ``train_ratio`` is not in ``(0, 1)``, if the split
-            produces an empty train or test set, or if any of the
-            numeric parameters is out of range.
-    """
+    """Plot a time series split into train and test regions."""
     if not isinstance(df, pd.DataFrame):
         raise TypeError("'df' must be a pandas DataFrame.")
 
@@ -2668,15 +2229,7 @@ def plot_train_test_split(
 # ===========================================================================
 
 def _smart_format(x, fmt):
-    """Apply a format string to a value, leaving strings and NaNs untouched.
-
-    Args:
-        x: Value to format.
-        fmt (str): Python format string (e.g. ``"{:,.4f}"``).
-
-    Returns:
-        The formatted value if ``x`` is numeric, otherwise ``x`` unchanged.
-    """
+    """Apply a format string to a value, leaving strings and NaNs untouched."""
     if pd.isna(x) or isinstance(x, str):
         return x
     try:
@@ -2686,14 +2239,7 @@ def _smart_format(x, fmt):
 
 
 def _format_apa_pvalue(val):
-    """Format a p-value in APA style (no leading zero, ``< .001`` rule).
-
-    Args:
-        val (float): p-value.
-
-    Returns:
-        str: Formatted p-value, or ``""`` when ``val`` is NaN.
-    """
+    """Format a p-value in APA style (no leading zero, ``< .001`` rule)."""
     if pd.isna(val):
         return ""
     if val < 0.001:
@@ -2719,23 +2265,7 @@ def _is_two_numbers(x):
 
 
 def _broadcast_param(value, n_panels, single_test, name):
-    """Broadcast a per-panel parameter to a list of ``n_panels`` entries.
-
-    Args:
-        value: Value to broadcast. ``None`` becomes a list of ``None``.
-        n_panels (int): Number of panels.
-        single_test (callable): Predicate returning ``True`` when
-            ``value`` should be applied to every panel.
-        name (str): Parameter name used in error messages.
-
-    Returns:
-        list: A list of length ``n_panels``.
-
-    Raises:
-        ValueError: If ``value`` is neither ``None``, a single value
-            accepted by ``single_test``, nor a sequence of length
-            ``n_panels``.
-    """
+    """Broadcast a per-panel parameter to a list of ``n_panels`` entries."""
     if value is None:
         return [None] * n_panels
     if single_test(value):
@@ -2946,5 +2476,11 @@ def _conclusion_for(test_name, p_value, alpha):
             "Efectos ARCH Significativos"
             if p_value < alpha
             else "Sin Efectos ARCH Significativos"
+        )
+    if test_name.startswith(("Jarque-Bera", "Lilliefors")):
+        return (
+            "Normalidad Rechazada"
+            if p_value < alpha
+            else "Normalidad No Rechazada"
         )
     return ""
