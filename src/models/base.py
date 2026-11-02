@@ -2,76 +2,54 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 import numpy as np
+import optuna
 
 
 class BaseVolatilityModel(ABC):
-    """Universal abstract base class for all volatility models in the project.
-
-    This interface ensures that the Trainer can interact identically with
-    econometric models, Machine Learning models, and Deep Learning models.
-
-    Attributes:
-        params (dict): Hyperparameters specific to the model.
-        is_fitted (bool): Flag indicating whether the model has been trained.
-    """
+    """Universal abstract base class for all volatility models in the project."""
 
     def __init__(self, **kwargs: Any) -> None:
-        """Initializes the model with its specific hyperparameters.
-
-        Args:
-            **kwargs: Arbitrary keyword arguments containing the model's 
-                hyperparameters (e.g., lags, distribution type, learning rate).
-        """
         self.params = kwargs
         self.is_fitted = False
+        self.is_valid = False
+        
+    @staticmethod
+    @abstractmethod
+    def suggest_params(trial: optuna.Trial) -> dict[str, Any]:
+        """Defines the hyperparameter search space for Optuna.
+        
+        Args:
+            trial: The Optuna trial object.
+            
+        Returns:
+            dict: A dictionary with the suggested hyperparameters.
+        """
 
     @property
     @abstractmethod
     def context_length(self) -> int:
-        """Returns the number of past observations needed as context to forecast.
-
-        The Trainer uses this property to extract the necessary historical data 
-        before the validation block begins.
-
-        Returns:
-            int: The number of required past observations (e.g., max(p, q) for GARCH).
-        """
+        """Returns the number of past observations needed as context to forecast."""
 
     @abstractmethod
-    def fit(self, y_train: np.ndarray) -> None:
-        """Fits the model using the training log returns.
-
-        Implementation specifics depend on the model family:
-            - Econometric: Uses Maximum Likelihood Estimation (MLE) to estimate 
-              parameters (e.g., omega, alpha, beta).
-            - ML/DL: Uses optimization algorithms to adjust weights.
-
+    def fit(self, y_train: np.ndarray, rs_train: np.ndarray = None) -> None:
+        """Fits the model using the training log returns and RS targets.
+        
         Args:
-            y_train: Array containing the log returns for the training set.
+            y_train (np.ndarray): Log returns for training.
+            rs_train (np.ndarray, optional): Rogers-Satchell targets for training. 
+                Required for DL models (for internal validation), optional for others.
 
-        Returns:
-            None
+        Must set `self.is_fitted = True` and `self.is_valid = True` on success.
         """
 
     @abstractmethod
-    def forecast(self, y_seq: np.ndarray) -> np.ndarray:
+    def forecast(self, y_seq: np.ndarray, rs_seq: np.ndarray = None) -> np.ndarray:
         """Generates variance predictions for the validation block.
-
-        It is the responsibility of each specific Wrapper to handle its 
-        own prediction logic using the provided sequence:
-            - ARCH/GARCH: Uses the first `context_length` elements to initialize 
-              the recursion, then predicts step-by-step.
-            - SVM/MLP: Constructs the lag matrix from `y_seq` and predicts 
-              the entire block in a single batch.
-
+        
         Args:
-            y_seq: Array containing the returns to forecast. It must include 
-                at least `context_length` past returns as context. Predictions 
-                are generated for all elements after the initial context.
-
-        Returns:
-            np.ndarray: Array of variance predictions (sigma^2) for the 
-                validation block.
+            y_seq (np.ndarray): Returns including the context window.
+            rs_seq (np.ndarray, optional): Actual RS values for the validation block. 
+                Required for DL models (for continuous fine-tuning).
         """
         
     @abstractmethod
@@ -79,6 +57,8 @@ class BaseVolatilityModel(ABC):
         """Retrieves the data necessary to run diagnostic tests.
 
         Returns:
-            Dict[str, Any]: A dictionary containing diagnostic data, such as 
-                standardized residuals, log-likelihood, and fitted values.
+            Dict[str, Any]: Must include at least:
+                - 'converged' (bool): Whether the optimizer converged.
+                - 'epochs_run' (int): Number of epochs/iterations run (0 for MLE).
+                - 'residuals' (np.ndarray, optional): Standardized residuals.
         """

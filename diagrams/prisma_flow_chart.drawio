@@ -1,6 +1,6 @@
 <mxfile host="app.diagrams.net">
   <diagram id="C5RBs43oDa-KdzZeNtuy" name="Page-1">
-    <mxGraphModel dx="752" dy="331" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+    <mxGraphModel dx="1203" dy="530" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
       <root>
         <mxCell id="WIyWlLk6GJQsqaUBKTNV-0" />
         <mxCell id="WIyWlLk6GJQsqaUBKTNV-1" parent="WIyWlLk6GJQsqaUBKTNV-0" />
@@ -61,7 +61,7 @@
         <mxCell id="EyM3CELrFtL09HMVI9L9-19" parent="WIyWlLk6GJQsqaUBKTNV-1" style="rounded=1;whiteSpace=wrap;html=1;roundedPerimeter=1;fontSize=13;rotation=-90;fontStyle=0" value="Incluidos" vertex="1">
           <mxGeometry height="30" width="80" x="140" y="545" as="geometry" />
         </mxCell>
-        <mxCell id="EyM3CELrFtL09HMVI9L9-21" parent="WIyWlLk6GJQsqaUBKTNV-1" style="rounded=0;whiteSpace=wrap;html=1;align=left;spacingLeft=11;spacingTop=0;" value="&lt;div&gt;&lt;span style=&quot;display:block; margin-bottom: 4px;&quot;&gt;Textos excluido (n = 15):&lt;/span&gt;&amp;nbsp; &amp;nbsp; Desajuste del objetivo&amp;nbsp;(n = 11)&lt;br&gt;&amp;nbsp;&amp;nbsp;&amp;nbsp;&amp;nbsp;Calidad editorial (n = 3)&lt;br&gt;&amp;nbsp; &amp;nbsp; No evaluable&amp;nbsp;(n = 1)&lt;/div&gt;" vertex="1">
+        <mxCell id="EyM3CELrFtL09HMVI9L9-21" parent="WIyWlLk6GJQsqaUBKTNV-1" style="rounded=0;whiteSpace=wrap;html=1;align=left;spacingLeft=11;spacingTop=0;" value="&lt;div&gt;&lt;span style=&quot;display:block; margin-bottom: 4px;&quot;&gt;Textos excluidos (n = 15):&lt;/span&gt;&amp;nbsp; &amp;nbsp; Desajuste del objetivo&amp;nbsp;(n = 11)&lt;br&gt;&amp;nbsp;&amp;nbsp;&amp;nbsp;&amp;nbsp;Calidad editorial (n = 3)&lt;br&gt;&amp;nbsp; &amp;nbsp; No evaluable&amp;nbsp;(n = 1)&lt;/div&gt;" vertex="1">
           <mxGeometry height="90" width="240" x="435" y="400" as="geometry" />
         </mxCell>
       </root>
