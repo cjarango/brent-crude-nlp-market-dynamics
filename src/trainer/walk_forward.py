@@ -7,6 +7,7 @@ and MLflow experiment tracking for all volatility models.
 """
 
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import mlflow
@@ -34,8 +35,10 @@ class WalkForwardTrainer:
         warmup: int = 1200,
         embargo: int = 1,
         n_trials: int = 30,
+        suggest_params_fn: Callable[[optuna.Trial], dict] | None = None,
+        early_stop_rounds: int | None = None,
     ) -> None:
-        """Initializes the trainer."""
+        """Initializes the trainer with optional custom search space and early stopping."""
         if embargo < 1:
             raise ValueError(
                 f"Embargo must be >= 1 to prevent data leakage, got {embargo}."
@@ -48,6 +51,8 @@ class WalkForwardTrainer:
         self.warmup = warmup
         self.embargo = embargo
         self.n_trials = n_trials
+        self.suggest_params_fn = suggest_params_fn
+        self.early_stop_rounds = early_stop_rounds
 
         self.logger = setup_logger(f"Trainer_{model_class.__name__}")
 
@@ -83,7 +88,11 @@ class WalkForwardTrainer:
 
     def objective(self, trial: optuna.Trial, y: np.ndarray, rs: np.ndarray) -> float:
         """Evaluates one Optuna trial via expanding-window walk-forward."""
-        params = self.model_class.suggest_params(trial)
+        if self.suggest_params_fn is not None:
+            params = self.suggest_params_fn(trial)
+        else:
+            params = self.model_class.suggest_params(trial)
+
         folds = self._get_folds(len(y))
         completed_folds = self._load_completed_folds(params)
 
@@ -204,11 +213,21 @@ class WalkForwardTrainer:
             )
             
             if remaining_trials > 0:
+                callbacks = []
+                if self.early_stop_rounds is not None:
+                    callbacks.append(
+                        optuna.study.EarlyStoppingCallback(
+                            early_stopping_rounds=self.early_stop_rounds
+                        )
+                    )
+                    self.logger.info(f"Early stopping enabled with patience={self.early_stop_rounds} trials.")
+
                 study.optimize(
                     lambda trial: self.objective(trial, y, rs),
                     n_trials=remaining_trials,
                     catch=(Exception,),
-                    show_progress_bar=True
+                    show_progress_bar=True,
+                    callbacks=callbacks,
                 )
 
             valid_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
