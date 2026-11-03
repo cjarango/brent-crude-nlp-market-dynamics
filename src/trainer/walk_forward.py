@@ -23,12 +23,7 @@ __all__ = ["WalkForwardTrainer"]
 
 
 class WalkForwardTrainer:
-    """Generic orchestrator for Walk-Forward Validation and Optuna.
-
-    Coordinates expanding-window cross-validation with embargo, hyperparameter
-    search via Optuna (with SQLite persistence for crash recovery), and 
-    experiment tracking via MLflow.
-    """
+    """Generic orchestrator for Walk-Forward Validation and Optuna."""
 
     def __init__(
         self,
@@ -40,21 +35,7 @@ class WalkForwardTrainer:
         embargo: int = 1,
         n_trials: int = 30,
     ) -> None:
-        """Initializes the trainer.
-
-        Args:
-            model_class (type[BaseVolatilityModel]): Model class to train.
-            scorer (VolatilityScorer): Scorer used on validation folds.
-            output_dir (str | Path): Destination directory for per-fold CSVs and SQLite DB.
-            n_splits (int, optional): Expanding-window folds. Defaults to 5.
-            warmup (int, optional): Minimum first-fold train size. Defaults to 1200.
-            embargo (int, optional): Samples dropped between train and validation.
-                Must be >= 1 to prevent data leakage. Defaults to 1.
-            n_trials (int, optional): Optuna trials. Defaults to 30.
-                
-        Raises:
-            ValueError: If embargo is less than 1.
-        """
+        """Initializes the trainer."""
         if embargo < 1:
             raise ValueError(
                 f"Embargo must be >= 1 to prevent data leakage, got {embargo}."
@@ -76,15 +57,7 @@ class WalkForwardTrainer:
         self.csv_path = self.output_dir / f"{self.model_class.__name__}_results.csv"
 
     def _get_folds(self, n_samples: int) -> list[tuple[int, int, int, int]]:
-        """Generates expanding-window folds with embargo.
-
-        Args:
-            n_samples (int): Total number of samples in the dataset.
-
-        Returns:
-            list[tuple[int, int, int, int]]: One (train_start, train_end, 
-                val_start, val_end) tuple per fold.
-        """
+        """Generates expanding-window folds with embargo."""
         val_size = (n_samples - self.warmup) // self.n_splits
         folds = []
         for i in range(self.n_splits):
@@ -95,14 +68,7 @@ class WalkForwardTrainer:
         return folds
 
     def _load_completed_folds(self, params: dict) -> int:
-        """Returns the number of folds already completed for a given config.
-
-        Args:
-            params (dict): Hyperparameter dictionary used to filter the CSV.
-
-        Returns:
-            int: Highest completed fold index for the given parameters.
-        """
+        """Returns the number of folds already completed for a given config."""
         if not self.csv_path.exists():
             return 0
         try:
@@ -116,16 +82,7 @@ class WalkForwardTrainer:
             return 0
 
     def objective(self, trial: optuna.Trial, y: np.ndarray, rs: np.ndarray) -> float:
-        """Evaluates one Optuna trial via expanding-window walk-forward.
-
-        Args:
-            trial (optuna.Trial): Optuna trial object.
-            y (np.ndarray): Full return series (training data only).
-            rs (np.ndarray): Full RS variance series (training data only).
-
-        Returns:
-            float: Mean QLIKE across validation folds.
-        """
+        """Evaluates one Optuna trial via expanding-window walk-forward."""
         params = self.model_class.suggest_params(trial)
         folds = self._get_folds(len(y))
         completed_folds = self._load_completed_folds(params)
@@ -134,7 +91,7 @@ class WalkForwardTrainer:
             df = pd.read_csv(self.csv_path)
             for k, v in params.items():
                 df = df[df[k] == v]
-            return df["qlike"].mean()
+            return float(df["qlike"].mean())
 
         fold_qlikes = []
         all_converged = True
@@ -150,13 +107,11 @@ class WalkForwardTrainer:
             rs_val = rs[val_start:val_end]
 
             model = self.model_class(**params)
-            context = model.context_length
             
-            # Pass aligned sequences to forecast to prevent index out of bounds
-            y_seq = y[val_start - context : val_end]
-            rs_seq = rs[val_start - context : val_end]
+            y_seq = y_val
+            rs_seq = rs_val
 
-            qlike_val = np.nan
+            qlike_val = 1e10  
             converged = True
             epochs_run = 0
             train_time = 0.0
@@ -174,15 +129,21 @@ class WalkForwardTrainer:
                     self.logger.warning(f"Fold {fold_idx} did NOT converge with {params}")
 
                 if model.is_valid:
-                    # Note: save_dir is NOT provided here to prevent Optuna from saving artifacts.
                     preds = model.forecast(y_seq, rs_seq)
                     qlike_val = self.scorer.qlike(rs_val, preds)
+                    
+                    if not np.isfinite(qlike_val):
+                        self.logger.error(f"Fold {fold_idx} produced non-finite QLIKE: {qlike_val}")
+                        qlike_val = 1e10
+                        converged = False
                 else:
                     self.logger.error(f"Fold {fold_idx} model invalid with {params}")
                     converged = False
+                    
             except Exception as e:  # noqa: BLE001
                 self.logger.error(f"Exception in Fold {fold_idx} with {params}: {e}")
                 converged = False
+                qlike_val = 1e10
                 all_converged = False
 
             if not converged:
@@ -209,23 +170,15 @@ class WalkForwardTrainer:
             mlflow.log_metric(f"fold_{fold_idx}_epochs", epochs_run, step=fold_idx)
             mlflow.log_metric(f"fold_{fold_idx}_train_time", train_time, step=fold_idx)
 
-            trial.report(np.nanmean(fold_qlikes), fold_idx)
+            trial.report(np.mean(fold_qlikes), fold_idx)
             if trial.should_prune():
                 raise optuna.TrialPruned()
 
         trial.set_user_attr("converged", all_converged)
-        return np.nanmean(fold_qlikes)
+        return float(np.mean(fold_qlikes))
 
     def run(self, y: np.ndarray, rs: np.ndarray) -> None:
-        """Runs the full Optuna search and logs the best trial to MLflow.
-        
-        Uses SQLite for persistence so if the process crashes (e.g., OOM at trial 20),
-        it will resume exactly where it left off upon restart.
-
-        Args:
-            y (np.ndarray): Training return series.
-            rs (np.ndarray): Training RS variance series.
-        """
+        """Runs the full Optuna search and logs the best trial to MLflow."""
         mlflow.set_experiment("Brent_Volatility_Benchmark")
 
         with mlflow.start_run(run_name=self.model_class.__name__):
@@ -255,7 +208,7 @@ class WalkForwardTrainer:
                     lambda trial: self.objective(trial, y, rs),
                     n_trials=remaining_trials,
                     catch=(Exception,),
-                    show_progress_bar=False,
+                    show_progress_bar=True
                 )
 
             valid_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]

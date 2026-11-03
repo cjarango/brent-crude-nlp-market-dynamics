@@ -3,7 +3,6 @@ dl_base
 =======
 
 Base class for Deep Learning volatility models (LSTM, GRU, TCN, etc.).
-Handles training, early stopping, and expanding-window fine-tuning.
 """
 
 import copy
@@ -74,12 +73,7 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
         self.logger = setup_logger(self.__class__.__name__)
 
     def fit(self, y_train: np.ndarray, rs_train: np.ndarray | None = None) -> None:
-        """Trains the model with a strict chronological 80/20 internal split.
-
-        Args:
-            y_train (np.ndarray): Log-returns.
-            rs_train (np.ndarray): Rogers-Satchell variance targets.
-        """
+        """Trains the model with a strict chronological 80/20 internal split."""
         if rs_train is None:
             raise ValueError("rs_train (Rogers-Satchell targets) must be provided.")
 
@@ -181,18 +175,7 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
         extra_metadata: dict | None = None,
         debug: bool = False,
     ) -> np.ndarray:
-        """Generates rolling one-step predictions with expanding-window fine-tuning.
-
-        Args:
-            y_seq (np.ndarray): Test return series.
-            rs_seq (np.ndarray): Test RS variance series, aligned with y_seq.
-            save_dir (str | None): Directory to save artifacts.
-            extra_metadata (dict | None): Additional metadata to include.
-            debug (bool): Whether to print debugging traces.
-
-        Returns:
-            np.ndarray: Variance predictions.
-        """
+        """Generates rolling one-step predictions with expanding-window fine-tuning."""
         if rs_seq is None:
             raise ValueError("rs_seq (Rogers-Satchell targets) must be provided.")
 
@@ -204,10 +187,7 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
         history_rs = list(self.rs_train_history)
 
         for i in range(len(y_seq)):
-            if i < context_len:
-                continue
-
-            current_window = np.array(y_seq[i - context_len : i])
+            current_window = np.array(history_y[-context_len:])
             x_tensor = (
                 torch.tensor(current_window, dtype=torch.float32)
                 .unsqueeze(0)
@@ -228,7 +208,7 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
             history_y.append(actual_y)
             history_rs.append(actual_rs)
 
-            if (i - context_len) % self.retrain_freq == 0:
+            if i % self.retrain_freq == 0:
                 val_len = max(context_len + 1, min(30, len(history_y) - context_len - 1))
                 
                 if val_len > 0 and len(history_y) > val_len:
@@ -244,8 +224,6 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
                         ft_train_loader = DataLoader(ft_train_dataset, batch_size=self.batch_size, shuffle=False)
                         ft_val_loader = DataLoader(ft_val_dataset, batch_size=self.batch_size, shuffle=False)
 
-                        # Fresh optimizer and scheduler for each fine-tuning block.
-                        # This prevents Adam momentum from previous blocks leaking into new weights.
                         optimizer = optim.Adam(
                             self.net.parameters(),
                             lr=self.params["learning_rate"],
@@ -310,7 +288,6 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
 
         predictions = np.array(predictions)
 
-        # Save artifacts ONLY if save_dir is provided (prevents Optuna from writing to disk)
         if save_dir is not None:
             self._save_artifact(
                 save_dir=save_dir,
