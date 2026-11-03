@@ -6,6 +6,7 @@ Orchestrates Walk-Forward Validation, Optuna hyperparameter search,
 and MLflow experiment tracking for all volatility models.
 """
 
+import functools
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -21,6 +22,17 @@ from src.utils.logger import setup_logger
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 __all__ = ["WalkForwardTrainer"]
+
+
+def _early_stopping_callback(study: optuna.Study, trial: optuna.trial.FrozenTrial, patience: int) -> None:
+    """Callback to stop the study if no improvement is seen for `patience` trials."""
+    if len(study.trials) < 2:
+        return
+    
+    best_trial_number = study.best_trial.number
+    
+    if (trial.number - best_trial_number) >= patience:
+        study.stop()
 
 
 class WalkForwardTrainer:
@@ -215,11 +227,12 @@ class WalkForwardTrainer:
             if remaining_trials > 0:
                 callbacks = []
                 if self.early_stop_rounds is not None:
-                    callbacks.append(
-                        optuna.study.EarlyStoppingCallback(
-                            early_stopping_rounds=self.early_stop_rounds
-                        )
+                    # Envolver nuestra función personalizada con el parámetro patience
+                    callback = functools.partial(
+                        _early_stopping_callback, 
+                        patience=self.early_stop_rounds
                     )
+                    callbacks.append(callback)
                     self.logger.info(f"Early stopping enabled with patience={self.early_stop_rounds} trials.")
 
                 study.optimize(
