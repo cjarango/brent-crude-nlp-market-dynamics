@@ -108,8 +108,8 @@ literature/*.pdf
 *.sqlite3
 mlruns/
 .mlruns/
-results/
-models/
+/results/
+/models/
 
 .DS_Store
 Thumbs.db
