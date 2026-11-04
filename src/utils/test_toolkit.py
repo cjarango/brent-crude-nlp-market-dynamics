@@ -12,15 +12,17 @@ The toolkit is strictly model-agnostic: it only requires the true realized
 variance and the predicted variance series.
 """
 
-__version__ = "1.1.0"
+__version__ = "1.3.2"
 
 import base64
 import io
 
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from IPython.display import HTML, display
+from matplotlib.patches import ConnectionPatch, Rectangle
 from src.eval.scorer import VolatilityScorer
 
 __all__ = [
@@ -37,35 +39,34 @@ def plot_volatility_fit(
     dates: pd.DatetimeIndex,
     rs_variance: np.ndarray,
     pred_variance: np.ndarray,
-    title: str = "Volatilidad Realizada vs Condicional",
+    title: str = "Volatilidad Realizada vs Predicha",
     xlab: str = "Fecha",
-    ylab: str = "Volatilidad Diaria",
-    label_realized: str = "Realizada (RS)",
-    label_pred: str = "Condicional del Modelo",
+    ylab: str = "Varianza",
+    label_realized: str = r"Volatilidad Realizada $\left(\sigma^2_R\right)$",
+    label_pred: str = r"Volatilidad $\left(\hat{\sigma}^2_t\right)$",
     legend_loc: str = "upper left",
-    legend_size: float = 12,
-    pads: tuple = (9, 9, 12),
+    legend_bbox: tuple = (0.08, 1.0),
+    legend_size: float = 13,
+    ylim: tuple | None = None,
+    y_step: float | None = None,
+    zoom_slice: np.ndarray | None = None,
+    zoom_title: str = "Zoom: Crisis",
+    zoom_bbox: list | tuple = (0.15, 0.30, 0.35, 0.35),
+    zoom_pad_frac: float = 0.15,
+    pads: tuple = (12, 12, 15),
     label_size: float = 12,
     title_size: float = 12,
     tick_size: float = 11,
-    line_width: float = 0.8,
-    figsize: tuple = (12, 5),
+    line_width: float = 1.2,
+    figsize: tuple = (12, 6),
     fmt: str = "svg",
     dpi: int = 100
 ) -> None:
-    """Plots the realized variance against the predicted variance.
-    
-    Args:
-        dates (pd.DatetimeIndex): Dates for the x-axis.
-        rs_variance (np.ndarray): True realized variance values.
-        pred_variance (np.ndarray): Predicted variance values.
-        ... (other styling args)
-    """
+    """Plots realized vs predicted variance, with optional zoom; ``zoom_pad_frac`` adds headroom around the zoomed region (rect + inset)."""
     fig, ax = plt.subplots(figsize=figsize)
 
-    # Se aplica la raíz cuadrada internamente para graficar volatilidad (std)
-    ax.plot(dates, np.sqrt(rs_variance), color="gray", alpha=0.6, linewidth=line_width, label=label_realized)
-    ax.plot(dates, np.sqrt(pred_variance), color="#0072B2", linewidth=1.2, label=label_pred)
+    ax.plot(dates, rs_variance, color="gray", linewidth=line_width, linestyle="-", label=label_realized)
+    ax.plot(dates, pred_variance, color="#0072B2", linewidth=line_width, linestyle="-", label=label_pred)
 
     pad_x, pad_y, pad_title = pads
 
@@ -73,17 +74,76 @@ def plot_volatility_fit(
     ax.set_ylabel(ylab, fontsize=label_size, labelpad=pad_y)
     ax.set_xlabel(xlab, fontsize=label_size, labelpad=pad_x)
 
-    for spine in ax.spines.values():
-        spine.set_visible(True)
-        spine.set_color("black")
-        spine.set_linewidth(0.8)
-
-    ax.tick_params(axis="x", which="both", bottom=True, top=False, labelsize=tick_size, direction="out", length=4, width=0.8, colors="black")
-    ax.tick_params(axis="y", which="both", left=True, right=False, labelsize=tick_size, direction="out", length=4, width=0.8, colors="black")
-
-    ax.margins(x=0.02, y=0.10)
-    ax.legend(frameon=False, fontsize=legend_size, loc=legend_loc)
+    _style_axes(ax, tick_size)
     ax.grid(False)
+    
+    if ylim is not None:
+        ax.set_ylim(ylim)
+    if y_step is not None:
+        ax.yaxis.set_major_locator(plt.MultipleLocator(y_step))
+
+    ax.legend(frameon=False, fontsize=legend_size, loc=legend_loc, bbox_to_anchor=legend_bbox)
+
+    if zoom_slice is not None:
+        ax_ins = ax.inset_axes(zoom_bbox)
+        
+        ax_ins.plot(dates[zoom_slice], rs_variance[zoom_slice], color="gray", linewidth=line_width, linestyle="-")
+        ax_ins.plot(dates[zoom_slice], pred_variance[zoom_slice], color="#0072B2", linewidth=line_width, linestyle="-")
+        
+        _style_axes(ax_ins, tick_size - 2)
+        ax_ins.grid(False)
+        
+        ax_ins.set_title(zoom_title, fontsize=tick_size, pad=12)
+        
+        xmin_data = dates[zoom_slice].min()
+        xmax_data = dates[zoom_slice].max()
+        ymin = min(rs_variance[zoom_slice].min(), pred_variance[zoom_slice].min())
+        ymax = max(rs_variance[zoom_slice].max(), pred_variance[zoom_slice].max())
+
+        zoom_pad = (ymax - ymin) * zoom_pad_frac
+        rect_ymin = ymin - zoom_pad
+        rect_ymax = ymax + zoom_pad
+        ax_ins.set_ylim(rect_ymin, rect_ymax)
+
+        xmin_num = mdates.date2num(xmin_data)
+        xmax_num = mdates.date2num(xmax_data)
+        
+        rect = Rectangle(
+            (xmin_num, rect_ymin), 
+            xmax_num - xmin_num, 
+            rect_ymax - rect_ymin, 
+            fill=False, 
+            edgecolor="black", 
+            linewidth=1.0, 
+            alpha=1.0 
+        )
+        ax.add_patch(rect)
+
+        con_top = ConnectionPatch(
+            xyA=(1.0, 1.0), 
+            coordsA=ax_ins.transAxes,
+            xyB=(xmin_num, rect_ymax), 
+            coordsB=ax.transData,
+            color="black", 
+            linewidth=1.0, 
+            alpha=1.0, 
+            zorder=10
+        )
+        
+        con_bot = ConnectionPatch(
+            xyA=(1.0, 0.0), 
+            coordsA=ax_ins.transAxes,
+            xyB=(xmin_num, rect_ymin), 
+            coordsB=ax.transData,
+            color="black", 
+            linewidth=1.0, 
+            alpha=1.0, 
+            zorder=10
+        )
+        
+        fig.add_artist(con_top)
+        fig.add_artist(con_bot)
+
     plt.tight_layout()
 
     if fmt == "svg":
@@ -110,17 +170,7 @@ def display_train_test_comparison(
     metrics: list | None = None,
     show_diff: bool = True
 ) -> None:
-    """Generates a comparison table of Train (In-Sample) vs Test (Out-of-Sample) metrics.
-
-    Args:
-        rs_train (np.ndarray): True realized variance for training.
-        preds_train (np.ndarray): Predicted variance for training.
-        rs_test (np.ndarray): True realized variance for testing.
-        preds_test (np.ndarray): Predicted variance for testing.
-        dist (str): Distribution used (for CRPS/Pinball). Defaults to "normal".
-        nu (float, optional): Shape parameter. Defaults to None.
-        ... (other formatting args)
-    """
+    """Generates a comparison table of Train (In-Sample) vs Test (Out-of-Sample) metrics."""
     expected_cols = 4 if show_diff else 3
     if len(column_titles) != expected_cols:
         raise ValueError(f"column_titles must be a tuple of exactly {expected_cols} strings.")
@@ -173,6 +223,22 @@ def display_train_test_comparison(
 # ===========================================================================
 # PRIVATE HELPERS
 # ===========================================================================
+
+def _style_axes(ax, tick_size):
+    """Apply the toolkit's standard axis style (spines + ticks)."""
+    for spine in ax.spines.values():
+        spine.set_visible(True)
+        spine.set_color("black")
+        spine.set_linewidth(0.8)
+
+    ax.tick_params(
+        axis="x", which="both", bottom=True, labelsize=tick_size,
+        direction="out", length=4, width=0.8, colors="black",
+    )
+    ax.tick_params(
+        axis="y", which="both", left=True, labelsize=tick_size,
+        direction="out", length=4, width=0.8, colors="black",
+    )
 
 def _table_style_rules() -> list:
     return [

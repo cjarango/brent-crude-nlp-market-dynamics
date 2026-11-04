@@ -112,30 +112,19 @@ def display_top_results(
     decimals: int = 3,
     n_replicas: int = 5,
     aggregate_mode: str = "mean",
-    column_names: list | tuple | None = None
+    column_names: list | tuple | None = None,
+    penalty_value: float = 5
 ) -> None:
-    """Loads training replicas, aggregates metrics, and displays the Top N configurations.
-
-    Args:
-        results_path (Path): Base path to the 'exec_1', 'exec_2' folders.
-        q_filter (list, optional): List of 'q' values to display. If None, shows all.
-        top_n (int): Number of best configurations to show. Defaults to 5.
-        decimals (int): Number of decimals for formatting. Defaults to 3.
-        n_replicas (int): Total number of replicas to load. Defaults to 5.
-        aggregate_mode (str): 'mean' for Mean ± SD or 'median' for Median ± IQR. 
-            Defaults to "mean".
-        column_names (list | tuple, optional): A list of new names for the output 
-            columns. Must match the total number of columns. If None, defaults 
-            are used.
-
-    Returns:
-        None: The table is rendered as HTML.
-    """
+    """Loads training replicas, aggregates metrics, and displays the Top N configurations."""
     all_results = []
     for exec_id in range(1, n_replicas + 1):
-        csv_path = results_path / f"exec_{exec_id}" / "results.csv"
-        if csv_path.exists():
-            df_exec = pd.read_csv(csv_path)
+        exec_dir = results_path / f"exec_{exec_id}"
+        if not exec_dir.exists():
+            continue
+        
+        csv_files = list(exec_dir.glob("*_results.csv"))
+        if csv_files:
+            df_exec = pd.read_csv(csv_files[0])
             df_exec["exec_id"] = exec_id
             all_results.append(df_exec)
 
@@ -152,9 +141,13 @@ def display_top_results(
         print(f"No results for the specified q values: {q_filter}")
         return
 
+    df_raw["is_failure"] = df_raw["qlike"] >= 1e9
+    df_raw.loc[df_raw["is_failure"], "qlike"] = penalty_value
+
     ignore_cols = [
         "fold", "train_size", "val_size", "exec_id", 
-        "qlike", "mse", "rmse", "mae", "crps", "pinball_05", "pinball_95"
+        "qlike", "mse", "rmse", "mae", "crps", "pinball_05", "pinball_95",
+        "seed", "converged", "epochs_run", "train_time_sec", "is_failure"
     ]
     
     group_cols = [c for c in df_raw.columns if c not in ignore_cols]
@@ -166,24 +159,32 @@ def display_top_results(
 
     df_stats = df_raw.groupby(group_cols + ["exec_id"])["qlike"].apply(_aggregate_series).unstack().reset_index()
     
+    df_failures = df_raw.groupby(group_cols + ["exec_id"])["is_failure"].any().reset_index()
+    df_stats = df_stats.merge(df_failures, on=group_cols + ["exec_id"])
+    
     df_stats["formatted"] = df_stats.apply(
-        lambda r: f"{r['center']:.{decimals}f} ± {r['spread']:.{decimals}f}", axis=1
+        lambda r: f"{r['center']:.{decimals}f} ± {r['spread']:.{decimals}f}" + 
+                  ("*" if r['is_failure'] else ""), 
+        axis=1
     )
 
     df_pivot = df_stats.pivot(index=group_cols, columns="exec_id", values="formatted")
     df_pivot.columns = [f"Replica {col}" for col in df_pivot.columns]
-    df_pivot = df_pivot.reset_index()
+    df_pivot = df_pivot.fillna("-").reset_index()
 
     df_global = df_stats.groupby(group_cols)["center"].apply(_aggregate_series).unstack().reset_index()
     
     agg_label = "Mean ± SD" if aggregate_mode == "mean" else "Median ± IQR"
     df_global[f"Global ({agg_label})"] = df_global.apply(
-        lambda r: f"{r['center']:.{decimals}f} ± {r['spread']:.{decimals}f}", axis=1
+        lambda r: f"{r['center']:.{decimals}f} ± {r['spread']:.{decimals}f}" if pd.notna(r['center']) else "-", 
+        axis=1
     )
     
     df_global["sort_val"] = df_global["center"]
+    failure_rates = df_raw.groupby(group_cols)["is_failure"].mean() * 100
+    df_global = df_global.merge(failure_rates.rename("Fail Rate (%)"), on=group_cols)
 
-    df_final = df_pivot.merge(df_global[group_cols + [f"Global ({agg_label})", "sort_val"]], on=group_cols)
+    df_final = df_pivot.merge(df_global[group_cols + [f"Global ({agg_label})", "sort_val", "Fail Rate (%)"]], on=group_cols)
     df_final = df_final.sort_values(by="sort_val", ascending=True)
     
     df_top = df_final.head(top_n).drop(columns=["sort_val"]).reset_index(drop=True)
@@ -201,14 +202,15 @@ def display_top_results(
         df_top.columns = column_names
     
     display_styled_df(df_top)
-
+    
 
 def run_model_diagnostics(
     std_residuals: np.ndarray, 
     lags: tuple = (10, 20, 30), 
     alpha: float = 0.05, 
     p_adjust: str = "holm",
-    column_titles: tuple | None = None
+    column_titles: tuple | None = None,
+    english: bool = True
 ) -> pd.DataFrame:
     """Runs a battery of diagnostic tests on standardized residuals.
 
@@ -219,8 +221,9 @@ def run_model_diagnostics(
         p_adjust (str): Method for FWER control ('holm', 'bonferroni', etc.). 
             Defaults to 'holm'.
         column_titles (tuple, optional): Custom names for the output columns. 
-            If None, defaults to ("Prueba", "Estadístico", "p-valor", 
-            f"p-ajustado ({p_adjust})", f"Conclusión (α={alpha})").
+            If None, defaults are used based on the `english` parameter.
+        english (bool, optional): If True, outputs conclusions and default column 
+            titles in English. If False, uses Spanish. Defaults to True.
             
     Returns:
         pd.DataFrame: Formatted diagnostics table.
@@ -249,26 +252,34 @@ def run_model_diagnostics(
     
     for fam in df["Family"].unique():
         mask = df["Family"] == fam
-        if mask.sum() > 1:
+        if fam in ["LB", "ARCH"] and mask.sum() > 1:
             _, p_adj, _, _ = multipletests(df.loc[mask, "p_raw"], method=p_adjust)
             df.loc[mask, "p_adj"] = p_adj
-        else:
-            df.loc[mask, "p_adj"] = df.loc[mask, "p_raw"]
             
     conclusions = []
     for _, row in df.iterrows():
-        p = row["p_adj"]
+        p = row["p_adj"] if pd.notna(row["p_adj"]) else row["p_raw"]
         test = row["Test"]
         
-        if "Ljung-Box" in test:
-            concl = "Sin Autocorrelación" if p > alpha else "Autocorrelación Significativa"
-        elif "ARCH-LM" in test:
-            concl = "Sin Efectos ARCH" if p > alpha else "Efectos ARCH Significativos"
-        elif "BDS" in test:
-            concl = "Sin Estructura No Lineal" if p > alpha else "Estructura No Lineal Significativa"
+        if english:
+            if "Ljung-Box" in test:
+                concl = "No Autocorrelation" if p > alpha else "Significant Autocorrelation"
+            elif "ARCH-LM" in test:
+                concl = "No ARCH Effects" if p > alpha else "Significant ARCH Effects"
+            elif "BDS" in test:
+                concl = "No Non-linear Structure" if p > alpha else "Significant Non-linear Structure"
+            else:
+                concl = "Normal Residuals" if p > alpha else "Non-normal Residuals"
         else:
-            concl = "Residuos Normales" if p > alpha else "Residuos No Normales"
-            
+            if "Ljung-Box" in test:
+                concl = "Sin Autocorrelación" if p > alpha else "Autocorrelación Significativa"
+            elif "ARCH-LM" in test:
+                concl = "Sin Efectos ARCH" if p > alpha else "Efectos ARCH Significativos"
+            elif "BDS" in test:
+                concl = "Sin Estructura No Lineal" if p > alpha else "Estructura No Lineal Significativa"
+            else:
+                concl = "Residuos Normales" if p > alpha else "Residuos No Normales"
+                
         conclusions.append(concl)
         
     df["Conclusion"] = conclusions
@@ -276,13 +287,22 @@ def run_model_diagnostics(
     df_out = df[["Test", "Stat", "p_raw", "p_adj", "Conclusion"]].copy()
     
     if column_titles is None:
-        column_titles = (
-            "Prueba", 
-            "Estadístico", 
-            "p-valor", 
-            f"p-ajustado ({p_adjust})", 
-            f"Conclusión (α={alpha})"
-        )
+        if english:
+            column_titles = (
+                "Test", 
+                "Statistic", 
+                "p-value", 
+                f"p-adjusted ({p_adjust})", 
+                f"Conclusion (α={alpha})"
+            )
+        else:
+            column_titles = (
+                "Prueba", 
+                "Estadístico", 
+                "p-valor", 
+                f"p-ajustado ({p_adjust})", 
+                f"Conclusión (α={alpha})"
+            )
         
     if len(column_titles) != 5:
         raise ValueError("column_titles must be a tuple of exactly 5 strings.")

@@ -60,16 +60,14 @@ project:
     title: "Introducción"
   - file: notebooks/01_systematic_literature_review.ipynb
     title: "Revisión de Literatura"
-  - file: notebooks/01_exploratory_data_analysis.ipynb
+  - file: notebooks/02_experimental_design.ipynb
+    title: "Diseño Experimental"
+  - file: notebooks/03_exploratory_data_analysis.ipynb
     title: "Análisis Exploratorio"
-  - file: notebooks/02_arch_model.ipynb
-    title: "Modelo ARCH"
-  - file: notebooks/03_garch_model.ipynb
+  - file: notebooks/04_garch_model.ipynb
     title: "Modelo GARCH"
-  - file: notebooks/04_egarch_model.ipynb
+  - file: notebooks/05_egarch_model.ipynb
     title: "Modelo EGARCH"
-  - file: notebooks/05_gjr_model.ipynb
-    title: "Modelo GJR"
 
 site:
   template: book-theme

@@ -77,6 +77,7 @@ class EGARCHWrapper(BaseVolatilityModel):
         """Fits the EGARCH model using Maximum Likelihood Estimation (MLE)."""
         self.y_train_history = y_train.copy()
         
+        # Scaling returns by 100 for MLE stability
         scaled_returns = y_train * 100.0
         
         try:
@@ -84,9 +85,9 @@ class EGARCHWrapper(BaseVolatilityModel):
                 scaled_returns, 
                 mean='Zero', 
                 vol='EGARCH', 
-                p=self.q, 
-                o=self.q, 
-                q=self.p, 
+                p=self.p, 
+                o=self.p,
+                q=self.q, 
                 dist=self.dist
             )
             self.model_fit = am.fit(disp='off', show_warning=False)
@@ -94,7 +95,7 @@ class EGARCHWrapper(BaseVolatilityModel):
             self.converged = bool(self.model_fit.convergence_flag == 0)
             
             if self.converged:
-                betas = [self.model_fit.params.get(f'beta[{j}]', 0.0) for j in range(1, self.p + 1)]
+                betas = [self.model_fit.params.get(f'beta[{j}]', 0.0) for j in range(1, self.q + 1)]
                 self.is_stationary = bool(np.abs(np.sum(betas)) < 1.0)
             else:
                 self.is_stationary = False
@@ -123,7 +124,6 @@ class EGARCHWrapper(BaseVolatilityModel):
         history = list(self.y_train_history)
 
         for i in range(len(y_seq)):
-            # CORRECCIÓN: Eliminado el if i < context_len.
             scaled_history = np.array(history) * 100.0
             
             try:
@@ -131,9 +131,9 @@ class EGARCHWrapper(BaseVolatilityModel):
                     scaled_history, 
                     mean='Zero', 
                     vol='EGARCH', 
-                    p=self.q, 
-                    o=self.q, 
-                    q=self.p, 
+                    p=self.p, 
+                    o=self.p, 
+                    q=self.q, 
                     dist=self.dist
                 )
                 local_fit = am_local.fit(disp='off', show_warning=False)
@@ -292,7 +292,15 @@ class EGARCHWrapper(BaseVolatilityModel):
             y_boot = boot_resid * cond_vol
             
             try:
-                am_boot = arch_model(y_boot, mean='Zero', vol='EGARCH', p=self.q, o=self.q, q=self.p, dist=self.dist)
+                am_boot = arch_model(
+                    y_boot, 
+                    mean='Zero', 
+                    vol='EGARCH', 
+                    p=self.p, 
+                    o=self.p, 
+                    q=self.q, 
+                    dist=self.dist
+                )
                 res_boot = am_boot.fit(disp='off')
                 for p in self.model_fit.params.index:
                     boot_params[p].append(res_boot.params[p])

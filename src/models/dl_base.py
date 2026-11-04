@@ -42,6 +42,7 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
         batch_size: int = 128,
         retrain_freq: int = 1,
         seed: int = 42,
+        target_scale: float = 1.0,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -49,6 +50,7 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
         self.net = None
         self.best_state_dict = None
         self.seed = seed
+        self.target_scale = target_scale 
 
         self.diagnostics = {"converged": False, "epochs_run": 0}
 
@@ -85,7 +87,9 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
 
         split_idx = int(len(y_train) * 0.8)
         y_tr, y_val = y_train[:split_idx], y_train[split_idx:]
-        rs_tr, rs_val = rs_train[:split_idx], rs_train[split_idx:]
+        
+        rs_tr = rs_train[:split_idx] * self.target_scale
+        rs_val = rs_train[split_idx:] * self.target_scale
 
         train_dataset = TimeSeriesDataset(y_tr, rs_tr, self.context_length)
         val_dataset = TimeSeriesDataset(y_val, rs_val, self.context_length)
@@ -184,7 +188,10 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
         predictions = []
 
         history_y = list(self.y_train_history)
-        history_rs = list(self.rs_train_history)
+        
+        # --- FIX: Escalamos la historia inicial de varianzas ---
+        history_rs = list(self.rs_train_history * self.target_scale)
+        # -------------------------------------------------------
 
         for i in range(len(y_seq)):
             current_window = np.array(history_y[-context_len:])
@@ -200,10 +207,13 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
             predictions.append(pred)
 
             actual_y = y_seq[i]
-            actual_rs = rs_seq[i]
+            
+            # --- FIX: Escalamos la varianza real del día ---
+            actual_rs = rs_seq[i] * self.target_scale
+            # ------------------------------------------------
 
             if debug:
-                print(f"[DEBUG] pred i={i:03d} | y={actual_y:+.6f} | rs={actual_rs:.6e} | pred={pred:.6e}")
+                print(f"[DEBUG] pred i={i:03d} | y={actual_y:+.6f} | rs={actual_rs/self.target_scale:.6e} | pred={pred/self.target_scale:.6e}")
 
             history_y.append(actual_y)
             history_rs.append(actual_rs)
@@ -238,6 +248,7 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
                         best_ft_state_dict = None
 
                         for epoch in range(self.max_epochs):
+                            self.net.train()
                             ft_epoch_loss = 0.0
                             for x_batch, y_batch in ft_train_loader:
                                 x_batch, y_batch = x_batch.to(self.device), y_batch.to(self.device)
@@ -286,7 +297,9 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
 
                         self.net.eval()
 
-        predictions = np.array(predictions)
+        # --- FIX: Des-escalamos las predicciones para devolverlas en la escala original (RS) ---
+        predictions = np.array(predictions) / self.target_scale
+        # --------------------------------------------------------------------------------------
 
         if save_dir is not None:
             self._save_artifact(
@@ -336,7 +349,7 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
                 "test_input": len(y_seq),
                 "predictions": len(predictions),
             },
-            "preprocessing": {},
+            "preprocessing": {"target_scale": self.target_scale},
             "data_hash": None,
             "validation_metrics": {},
             "test_metrics": {},

@@ -563,6 +563,9 @@ def plot_distribution_fit(
     ylab_left="Density",
     xlab_right="Theoretical Quantiles",
     ylab_right="Sample Quantiles",
+    legend_loc="upper right",
+    ylim_left=None,
+    y_step_left=None,
     pads=(9, 9, 12),
     label_size=12,
     title_size=12,
@@ -587,8 +590,7 @@ def plot_distribution_fit(
     the fitted density overlaid; the right panel shows the Q-Q plot
     (theoretical quantiles on the x-axis, sample quantiles on the
     y-axis) with a y=x reference line. The fitted parameters are
-    displayed in the legend of the left panel. Only one distribution
-    is shown per call; the two are never overlaid.
+    displayed in the legend of the left panel.
 
     Args:
         series (pandas.Series): Input series. NaNs are dropped before
@@ -597,8 +599,6 @@ def plot_distribution_fit(
             Defaults to ``"t"``.
         params (dict, optional): Dictionary with the distribution parameters.
             If ``None``, they are estimated via Maximum Likelihood.
-            For ``dist="normal"``, keys must be 'mu' and 'sigma'.
-            For ``dist="t"``, keys must be 'nu', 'loc', and 'scale'.
         param_labels (dict, optional): Custom labels for the distribution
             parameters. Keys must be 'mu', 'sigma', and 'nu'. Defaults
             to ``{"mu": "μ", "sigma": "σ", "nu": "ν"}``.
@@ -613,50 +613,32 @@ def plot_distribution_fit(
             quantiles). Defaults to ``"Theoretical Quantiles"``.
         ylab_right (str): Y-axis label for the Q-Q panel (sample
             quantiles). Defaults to ``"Sample Quantiles"``.
-        pads (tuple of float): Padding values ``(pad_x, pad_y,
-            pad_title)``. Defaults to ``(9, 9, 12)``.
-        label_size (float): Font size for the axis labels. Defaults
-            to 12.
-        title_size (float): Font size for the panel titles. Defaults
-            to 12.
-        tick_size (float): Font size for the tick labels and legend.
-            Defaults to 11.
+        legend_loc (str): Location of the legend in the left panel. Defaults to "upper right".
+        ylim_left (tuple of float, optional): Y-axis limits for the left panel. Defaults to None.
+        y_step_left (float, optional): Step for Y-axis ticks in the left panel. Defaults to None.
+        pads (tuple of float): Padding values ``(pad_x, pad_y, pad_title)``. Defaults to ``(9, 9, 12)``.
+        label_size (float): Font size for the axis labels. Defaults to 12.
+        title_size (float): Font size for the panel titles. Defaults to 12.
+        tick_size (float): Font size for the tick labels and legend. Defaults to 11.
         bins (int): Number of histogram bins. Defaults to 80.
-        line_width (float): Width of the fitted density line. Defaults
-            to 1.5.
-        marker_size (float): Size of the Q-Q scatter markers. Defaults
-            to 10.
-        marker_alpha (float): Alpha of the Q-Q scatter markers.
-            Defaults to 0.6.
-        ref_line_color (str): Color of the y=x reference line in the
-            Q-Q plot. Defaults to ``"black"``.
-        ref_line_linestyle (str): Line style of the reference line.
-            Defaults to ``"--"``.
-        ref_line_width (float): Width of the reference line. Defaults
-            to 1.0.
-        right_yaxis (bool): If ``True``, the Q-Q plot's y-axis is moved
-            to the right side. Defaults to ``True``.
-        figsize (tuple of float): Figure size in inches. Defaults to
-            ``(10, 4.5)``.
-        render (bool): If ``True``, the figure is passed to
-            ``render_figure`` for inline rendering. Defaults to
-            ``True``.
-        fmt ({"svg", "png"}): Output format forwarded to
-            ``render_figure``. Defaults to ``"svg"``.
-        dpi (int): Resolution forwarded to ``render_figure``; only
-            takes effect when ``fmt="png"``. Defaults to ``100``.
+        line_width (float): Width of the fitted density line. Defaults to 1.5.
+        marker_size (float): Size of the Q-Q scatter markers. Defaults to 10.
+        marker_alpha (float): Alpha of the Q-Q scatter markers. Defaults to 0.6.
+        ref_line_color (str): Color of the y=x reference line in the Q-Q plot. Defaults to ``"black"``.
+        ref_line_linestyle (str): Line style of the reference line. Defaults to ``"--"``.
+        ref_line_width (float): Width of the reference line. Defaults to 1.0.
+        right_yaxis (bool): If ``True``, the Q-Q plot's y-axis is moved to the right. Defaults to ``True``.
+        figsize (tuple of float): Figure size in inches. Defaults to ``(10, 4.5)``.
+        render (bool): If ``True``, the figure is passed to ``render_figure``. Defaults to ``True``.
+        fmt ({"svg", "png"}): Output format forwarded to ``render_figure``. Defaults to ``"svg"``.
+        dpi (int): Resolution forwarded to ``render_figure``. Defaults to ``100``.
 
     Returns:
-        tuple: ``(fig, (ax1, ax2))`` with the matplotlib figure and the
-        two axes (histogram/density on the left, Q-Q plot on the
-        right).
+        tuple: ``(fig, (ax1, ax2))`` with the matplotlib figure and the two axes.
 
     Raises:
-        TypeError: If ``series`` has no ``dropna`` method, if
-            ``titles`` (when provided) is not a tuple/list of two
-            strings, or if ``figsize`` is not a tuple/list of length 2.
-        ValueError: If ``series`` is empty after dropping NaNs, or if
-            ``dist`` is not one of ``{"normal", "t"}``.
+        TypeError: If ``series`` has no ``dropna`` method.
+        ValueError: If ``series`` is empty after dropping NaNs, or if ``dist`` is not one of ``{"normal", "t"}``.
     """
     if not hasattr(series, "dropna"):
         raise TypeError(
@@ -706,8 +688,7 @@ def plot_distribution_fit(
             
         pdf = stats.t.pdf(x, nu, loc, scale)
         theoretical_q = stats.t.ppf(p, nu, loc, scale)
-        
-        # AHORA SOLO MUESTRA EL NU (GRADOS DE LIBERTAD) EN LA LEYENDA
+
         nu_lbl = param_labels.get('nu', 'ν')
         legend_label = f"t-Student ({nu_lbl} = {nu:.4f})"
         
@@ -732,7 +713,13 @@ def plot_distribution_fit(
     ax1.set_title(titles[0], fontsize=title_size, pad=pad_title)
     ax1.set_xlabel(xlab, fontsize=label_size, labelpad=pad_x)
     ax1.set_ylabel(ylab_left, fontsize=label_size, labelpad=pad_y)
-    ax1.legend(frameon=False, fontsize=tick_size)
+    
+    if ylim_left is not None:
+        ax1.set_ylim(ylim_left)
+    if y_step_left is not None:
+        ax1.yaxis.set_major_locator(plt.MultipleLocator(y_step_left))
+
+    ax1.legend(frameon=False, fontsize=tick_size, loc=legend_loc)
 
     ax2.scatter(
         theoretical_q, sample_q,
@@ -762,11 +749,10 @@ def plot_distribution_fit(
 
     return fig, (ax1, ax2)
 
-
 def distribution_fit_table(
     series,
     column_titles=(
-        "Distribución", "Parámetros", "Log-Likelihood",
+        "Distribución", "Log-Likelihood", 
         "AIC", "BIC", "Estadístico LRT", "p-valor LRT"
     ),
     params=None,
@@ -778,47 +764,28 @@ def distribution_fit_table(
     """Compare Normal vs t-Student fit using MLE, AIC, BIC, and LRT.
 
     Fits both distributions, calculates the information criteria, and
-    performs the Likelihood Ratio Test (LRT). The fitted parameters
-    are included in a dedicated column: mu and sigma for the Normal,
-    and only nu for the t-Student. The Normal occupies
+    performs the Likelihood Ratio Test (LRT). The Normal occupies
     the first row and the t-Student the second.
 
     Args:
-        series (pandas.Series): Input series. NaNs are dropped before
-            fitting.
+        series (pandas.Series): Input series. NaNs are dropped before fitting.
         column_titles (tuple or list of str): Column names in the
-            order ``(distribution, params, log_likelihood, aic, bic,
-            lrt_stat, lrt_pvalue)``. Must contain exactly seven
-            strings. Defaults to ``("Distribución", "Parámetros",
-            "Log-Likelihood", "AIC", "BIC", "Estadístico LRT",
-            "p-valor LRT")``.
+            order ``(distribution, log_likelihood, aic, bic, lrt_stat, lrt_pvalue)``. 
+            Must contain exactly six strings.
         params (dict, optional): Dictionary with the fitted parameters.
-            If ``None``, they are estimated via Maximum Likelihood.
-            Structure: ``{"normal": {"mu": ..., "sigma": ...},
-            "t": {"nu": ..., "loc": ..., "scale": ...}}``.
-        param_labels (dict, optional): Custom labels for the
-            distribution parameters. Keys must be 'mu', 'sigma', and
-            'nu'. Defaults to ``{"mu": "μ", "sigma": "σ", "nu": "ν"}``.
-        decimals (int): Number of decimals for the log-likelihood,
-            AIC, BIC and LRT columns. Defaults to 2.
-        param_decimals (int): Number of decimals for the fitted
-            parameters displayed in the "Parámetros" column. Defaults
-            to 4.
-        render (bool): If ``True``, the styled table is rendered as
-            centered HTML via ``IPython.display``. Defaults to
-            ``True``.
+        param_labels (dict, optional): Custom labels for the parameters.
+        decimals (int): Number of decimals for the log-likelihood, AIC, BIC and LRT columns.
+        param_decimals (int): Number of decimals for the fitted parameters (unused in table).
+        render (bool): If ``True``, renders as centered HTML.
 
     Returns:
-        pandas.DataFrame: The plain (unstyled) results table. The
-        styled version is built internally and, when ``render=True``,
-        rendered as HTML — it is not returned.
+        pandas.DataFrame: The plain (unstyled) results table.
 
     Raises:
-        TypeError: If ``series`` has no ``dropna`` method, if
-            ``column_titles`` is not a tuple/list of seven strings, or
-            if ``render`` is not a boolean.
-        ValueError: If ``series`` is empty after dropping NaNs, or if
-            ``column_titles`` does not contain exactly seven elements.
+        TypeError: If ``series`` has no ``dropna`` method, or if ``column_titles`` 
+            is not a tuple/list of six strings.
+        ValueError: If ``series`` is empty, or if ``column_titles`` does not 
+            contain exactly six elements.
     """
     if not hasattr(series, "dropna"):
         raise TypeError(
@@ -830,9 +797,9 @@ def distribution_fit_table(
     if len(series) == 0:
         raise ValueError("'series' is empty after dropping NaNs.")
 
-    if not isinstance(column_titles, (tuple, list)) or len(column_titles) != 7:
+    if not isinstance(column_titles, (tuple, list)) or len(column_titles) != 6:
         raise ValueError(
-            "'column_titles' must be a tuple/list of exactly 7 strings."
+            "'column_titles' must be a tuple/list of exactly 6 strings."
         )
 
     if not all(isinstance(c, str) for c in column_titles):
@@ -840,9 +807,6 @@ def distribution_fit_table(
 
     if not isinstance(render, bool):
         raise TypeError("'render' must be a boolean.")
-
-    if param_labels is None:
-        param_labels = _DEFAULT_PARAM_LABELS
 
     n = len(series)
 
@@ -859,42 +823,29 @@ def distribution_fit_table(
     ll_norm = float(np.sum(stats.norm.logpdf(series, mu_n, sigma_n)))
     aic_norm = 2 * 2 - 2 * ll_norm
     bic_norm = 2 * np.log(n) - 2 * ll_norm
-    
-    mu_lbl = param_labels.get('mu', 'μ')
-    sigma_lbl = param_labels.get('sigma', 'σ')
-    nu_lbl = param_labels.get('nu', 'ν')
-
-    params_norm = (
-        f"{mu_lbl} = {mu_n:.{param_decimals}f}, "
-        f"{sigma_lbl} = {sigma_n:.{param_decimals}f}"
-    )
 
     ll_t = float(np.sum(stats.t.logpdf(series, nu_t, loc_t, scale_t)))
     aic_t = 2 * 3 - 2 * ll_t
     bic_t = 3 * np.log(n) - 2 * ll_t
-    
-    # AHORA SOLO MUESTRA EL NU (GRADOS DE LIBERTAD) EN LA TABLA
-    params_t = f"{nu_lbl} = {nu_t:.{param_decimals}f}"
 
     lr_stat = 2 * (ll_t - ll_norm)
     lr_p = float(stats.chi2.sf(lr_stat, df=1))
 
     df_fit = pd.DataFrame({
         column_titles[0]: ["Normal", "t-Student"],
-        column_titles[1]: [params_norm, params_t],
-        column_titles[2]: [ll_norm, ll_t],
-        column_titles[3]: [aic_norm, aic_t],
-        column_titles[4]: [bic_norm, bic_t],
-        column_titles[5]: ["-", lr_stat],
-        column_titles[6]: ["-", lr_p],
+        column_titles[1]: [ll_norm, ll_t],
+        column_titles[2]: [aic_norm, aic_t],
+        column_titles[3]: [bic_norm, bic_t],
+        column_titles[4]: ["-", lr_stat],
+        column_titles[5]: ["-", lr_p],
     })
 
     format_dict = {
+        column_titles[1]: lambda x: _smart_format(x, f"{{:,.{decimals}f}}"),
         column_titles[2]: lambda x: _smart_format(x, f"{{:,.{decimals}f}}"),
         column_titles[3]: lambda x: _smart_format(x, f"{{:,.{decimals}f}}"),
         column_titles[4]: lambda x: _smart_format(x, f"{{:,.{decimals}f}}"),
-        column_titles[5]: lambda x: _smart_format(x, f"{{:,.{decimals}f}}"),
-        column_titles[6]: lambda x: _format_apa_pvalue(x) if isinstance(x, (int, float)) else x,
+        column_titles[5]: lambda x: _format_apa_pvalue(x) if isinstance(x, (int, float)) else x,
     }
 
     styled_fit = (
@@ -908,7 +859,6 @@ def distribution_fit_table(
         _render_styled(styled_fit)
 
     return df_fit
-
 
 def plot_series_and_annual_boxplot(
     series,
