@@ -24,8 +24,9 @@ import numpy as np
 import optuna
 import pandas as pd
 from arch import arch_model
-from src.models.base import BaseVolatilityModel
 from tqdm.auto import tqdm
+
+from src.models.base import BaseVolatilityModel
 
 __all__ = ["GARCHWrapper"]
 

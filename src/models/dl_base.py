@@ -20,13 +20,14 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn.utils as torch_utils
+from torch import optim
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.utils.data import DataLoader
+
 from src.data.dataset import TimeSeriesDataset
 from src.eval.losses import QLIKELoss
 from src.models.base import BaseVolatilityModel
 from src.utils.logger import setup_logger
-from torch import optim
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.utils.data import DataLoader
 
 __all__ = ["BasePyTorchVolatilityModel"]
 
