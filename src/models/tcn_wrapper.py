@@ -16,7 +16,7 @@ Architecture based on:
     for sequence modeling." arXiv:1803.01271.
 """
 
-__version__ = "1.1.0"  # Subimos versión por el cambio de hiperparámetro
+__version__ = "1.3.0"
 
 import math
 
@@ -24,7 +24,6 @@ import optuna
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn.utils import weight_norm
 
 from src.models.dl_base import BasePyTorchVolatilityModel
 
@@ -32,12 +31,17 @@ __all__ = ["TCNModel"]
 
 
 class CausalConv1d(nn.Module):
-    """1D convolution with causal padding (left-only) and WeightNorm."""
+    """1D convolution with causal padding (left-only).
+    
+    NOTE: WeightNorm was removed to prevent 0/0 = NaN errors during 
+    backpropagation when combined with weight_decay and ReLU.
+    """
     def __init__(self, in_channels, out_channels, kernel_size, dilation):
         super().__init__()
         self.padding = (kernel_size - 1) * dilation
-        self.conv = weight_norm(
-            nn.Conv1d(in_channels, out_channels, kernel_size, dilation=dilation)
+        # El ajuste de Claude: Convolución estándar sin weight_norm
+        self.conv = nn.Conv1d(
+            in_channels, out_channels, kernel_size, dilation=dilation
         )
 
     def forward(self, x):
@@ -111,21 +115,26 @@ class TCNModel(BasePyTorchVolatilityModel):
         kernel_size = trial.suggest_categorical("kernel_size", [2, 3])
         num_convs = trial.suggest_categorical("num_convs", [1, 2, 3])
         
-        # Ensure the receptive field covers the entire look_back window
-        # RF = 1 + num_convs * (kernel_size - 1) * (2^num_levels - 1) >= look_back
         min_levels = math.ceil(
             math.log2(1 + (look_back - 1) / (num_convs * (kernel_size - 1)))
         )
         
+        max_levels = min(min_levels + 2, 5)
+        
         return {
             "look_back": look_back,
-            "num_levels": trial.suggest_int("num_levels", min_levels, min_levels + 2),
-            "channels": trial.suggest_categorical("channels", [16, 32, 64]),
+            "num_levels": trial.suggest_int("num_levels", min_levels, max_levels),
+            "channels": trial.suggest_categorical("channels", [32, 64, 128]),
             "kernel_size": kernel_size,
             "num_convs": num_convs,
-            "dropout": trial.suggest_float("dropout", 0.0, 0.5),
+            "dropout": trial.suggest_float("dropout", 0.0, 0.3),
             "learning_rate": trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True),
             "weight_decay": trial.suggest_float("weight_decay", 1e-6, 1e-3, log=True),
+            "max_epochs": 200,
+            "patience": 20,
+            "retrain_freq": 1,
+            "target_scale": 1e4,
+            "seed": 42,
         }
 
     def __init__(

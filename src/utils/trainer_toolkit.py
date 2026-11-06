@@ -28,13 +28,14 @@ Diagnostics
 
 Visual Analysis
     plot_metric_evolution
+    plot_learning_curve
 
 Dependencies
 ------------
 numpy, pandas, matplotlib, scipy, statsmodels, IPython
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 __author__ = (
     "Juan Camilo Mendoza Arango <cjarango@uninorte.edu.co>, "
@@ -58,6 +59,7 @@ from statsmodels.tsa.stattools import bds
 __all__ = [
     "display_styled_df",
     "display_top_results",
+    "plot_learning_curve",
     "plot_metric_evolution",
     "run_model_diagnostics",
 ]
@@ -510,13 +512,8 @@ def plot_metric_evolution(
     if y_step is not None:
         ax.yaxis.set_major_locator(plt.MultipleLocator(y_step))
 
-    for spine in ax.spines.values():
-        spine.set_visible(True)
-        spine.set_color("black")
-        spine.set_linewidth(0.8)
-
-    ax.tick_params(axis="both", which="both", labelsize=tick_size, direction="out",
-                   length=4, width=0.8, colors="black")
+    _style_axes(ax, tick_size)
+    ax.grid(False)
 
     unique_x = sorted(df_plot[x_col].unique())
     ax.set_xticks(unique_x)
@@ -524,9 +521,131 @@ def plot_metric_evolution(
     ax.margins(x=0.05, y=0.10)
     ax.legend(title=legend_title, title_fontsize=legend_size + 1,
               fontsize=legend_size, frameon=False, loc="upper right")
-    ax.grid(False)
     plt.tight_layout()
 
+    _render_figure(fig, fmt, dpi)
+
+
+def plot_learning_curve(
+    history: dict,
+    title: str = "Curva de Aprendizaje",
+    xlab: str = "Época",
+    ylab: str = "Pérdida QLIKE",
+    label_train: str = "Entrenamiento",
+    label_val: str = "Validación",
+    label_best: str = "Mejores pesos",
+    figsize: tuple = (12, 6),
+    fmt: str = "svg",
+    dpi: int = 100,
+    title_size: float = 14,
+    label_size: float = 14,
+    tick_size: float = 12,
+    legend_size: float = 14,
+    line_width: float = 1.2,
+    xlim: tuple | None = None,
+    ylim: tuple | None = None,
+    x_step: float | None = None,
+    y_step: float | None = None,
+    legend_loc: str = "upper right",
+    legend_bbox: tuple = (1.0, 1.0),
+    title_pad: float = 15,
+    xlab_pad: float = 12,
+    ylab_pad: float = 12,
+) -> None:
+    """Generates a learning curve plot from a model's training history.
+
+    Args:
+        history (dict): Dictionary containing 'train_loss' and 'val_loss' lists.
+        title (str): Plot title. Defaults to "Curva de Aprendizaje".
+        xlab (str): X-axis label. Defaults to "Época".
+        ylab (str): Y-axis label. Defaults to "Pérdida QLIKE".
+        label_train (str): Label for the training curve.
+        label_val (str): Label for the validation curve.
+        label_best (str): Label for the vertical line marking the best weights.
+        figsize (tuple): Figure size. Defaults to (12, 6).
+        fmt (str): Output format ('svg' or 'png'). Defaults to 'svg'.
+        dpi (int): Resolution for 'png'. Defaults to 100.
+        title_size (float): Font size for title. Defaults to 14.
+        label_size (float): Font size for axis labels. Defaults to 14.
+        tick_size (float): Font size for ticks. Defaults to 12.
+        legend_size (float): Font size for legend. Defaults to 14.
+        line_width (float): Width of the plotted lines. Defaults to 1.2.
+        xlim (tuple, optional): Limits for the X-axis. Defaults to None.
+        ylim (tuple, optional): Limits for the Y-axis. Defaults to None.
+        x_step (float, optional): Step size for X-axis ticks. Defaults to None.
+        y_step (float, optional): Step size for Y-axis ticks. Defaults to None.
+        legend_loc (str): Location anchor for the legend. Defaults to "upper right".
+        legend_bbox (tuple): Free positioning of the legend via bounding box (x, y). Defaults to (1.0, 1.0).
+        title_pad (float): Padding for the title. Defaults to 15.
+        xlab_pad (float): Padding for the X-axis label. Defaults to 12.
+        ylab_pad (float): Padding for the Y-axis label. Defaults to 12.
+    """
+    if not history or "train_loss" not in history or "val_loss" not in history:
+        raise ValueError("History must contain 'train_loss' and 'val_loss'.")
+
+    epochs = range(1, len(history["train_loss"]) + 1)
+    best_epoch = np.argmin(history["val_loss"]) + 1
+    best_val_loss = history["val_loss"][best_epoch - 1]
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    ax.plot(epochs, history["train_loss"], label=label_train, color="#0072B2", linewidth=line_width)
+    ax.plot(epochs, history["val_loss"], label=label_val, color="#D50000", linewidth=line_width)
+
+    ax.axvline(
+        x=best_epoch, color="black", linestyle="--", linewidth=line_width * 0.5,
+        label=f"{label_best}"
+    )
+    ax.scatter(best_epoch, best_val_loss, color="black", s=50, zorder=5)
+
+    ax.set_title(title, fontsize=title_size, pad=title_pad, loc="center")
+    ax.set_xlabel(xlab, fontsize=label_size, labelpad=xlab_pad)
+    ax.set_ylabel(ylab, fontsize=label_size, labelpad=ylab_pad)
+
+    if xlim is not None:
+        ax.set_xlim(xlim)
+    if ylim is not None:
+        ax.set_ylim(ylim)
+
+    if x_step is not None:
+        ax.xaxis.set_major_locator(plt.MultipleLocator(x_step))
+    if y_step is not None:
+        ax.yaxis.set_major_locator(plt.MultipleLocator(y_step))
+
+    _style_axes(ax, tick_size)
+    ax.grid(False)
+
+    margins_y = 0.10 if ylim is None else 0
+    ax.margins(x=0.05, y=margins_y)
+    
+    ax.legend(frameon=False, fontsize=legend_size, loc=legend_loc, bbox_to_anchor=legend_bbox)
+    plt.tight_layout()
+
+    _render_figure(fig, fmt, dpi)
+    
+# ===========================================================================
+# PRIVATE HELPERS
+# ===========================================================================
+
+def _style_axes(ax, tick_size: float) -> None:
+    """Apply the toolkit's standard axis style (spines + ticks)."""
+    for spine in ax.spines.values():
+        spine.set_visible(True)
+        spine.set_color("black")
+        spine.set_linewidth(0.8)
+
+    ax.tick_params(
+        axis="x", which="both", bottom=True, labelsize=tick_size,
+        direction="out", length=4, width=0.8, colors="black",
+    )
+    ax.tick_params(
+        axis="y", which="both", left=True, labelsize=tick_size,
+        direction="out", length=4, width=0.8, colors="black",
+    )
+
+
+def _render_figure(fig, fmt: str = "svg", dpi: int = 100) -> None:
+    """Renders a Matplotlib figure as SVG or PNG directly in the notebook."""
     if fmt == "svg":
         buf = io.BytesIO()
         fig.savefig(buf, format="svg", bbox_inches="tight")
@@ -541,14 +660,9 @@ def plot_metric_evolution(
         plt.close(fig)
         display(HTML(
             f'<div style="text-align: center; width: 100%;">'
-            f'<img src="data:image/png;base64,{base64.b64encode(buf.getbuffer()).decode("ascii")}">'
-            f'</div>'
+            f'<img src="data:image/png;base64,{base64.b64encode(buf.getbuffer()).decode("ascii")}"></div>'
         ))
 
-
-# ===========================================================================
-# PRIVATE HELPERS
-# ===========================================================================
 
 def _format_apa_pvalue(val: float) -> str:
     """Format a p-value in APA style (no leading zero, < .001 rule)."""
