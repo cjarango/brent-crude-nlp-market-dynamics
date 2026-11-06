@@ -3,13 +3,11 @@ wtd_har_gru_wrapper
 ===================
 
 Implementation of the WTD-HAR-RV-GRU hybrid model based on Pan et al. (2025).
-
-This wrapper inherits from BasePyTorchVolatilityModel (leaving dl_base.py untouched).
-It internally fits a WTD-HAR model to generate predictions and residuals, which 
-are then fed to a GRU alongside the original returns.
+Includes strict walk-forward fine-tuning of the GRU at every step.
 """
 
 import copy
+import gc
 
 import numpy as np
 import optuna
@@ -28,9 +26,8 @@ __all__ = ["WTDHARGRUWrapper"]
 
 
 class HARGRUDataset(Dataset):
-    """Dataset with 3 channels: [returns, har_predictions, har_residuals]."""
     def __init__(self, X: np.ndarray, y: np.ndarray, look_back: int):
-        self.X = torch.tensor(X, dtype=torch.float32)  # Shape: (N, 3)
+        self.X = torch.tensor(X, dtype=torch.float32)
         self.y = torch.tensor(y, dtype=torch.float32)
         self.look_back = look_back
 
@@ -44,7 +41,6 @@ class HARGRUDataset(Dataset):
 
 
 class HARGRUNetwork(nn.Module):
-    """GRU taking 3 input channels and outputting positive variance."""
     def __init__(self, hidden_size: int, num_layers: int, dropout: float):
         super().__init__()
         self.gru = nn.GRU(
@@ -63,8 +59,6 @@ class HARGRUNetwork(nn.Module):
 
 
 class WTDHARGRUWrapper(BasePyTorchVolatilityModel):
-    """Hybrid model combining WTD-HAR and GRU, leaving dl_base.py untouched."""
-
     @staticmethod
     def suggest_params(trial: optuna.Trial) -> dict:
         return {
@@ -119,7 +113,6 @@ class WTDHARGRUWrapper(BasePyTorchVolatilityModel):
         
         self.feature_mean = None
         self.feature_std = None
-        
         self.train_har_preds = None
         self.train_har_resids = None
 
@@ -128,7 +121,6 @@ class WTDHARGRUWrapper(BasePyTorchVolatilityModel):
         return self.params["look_back"]
 
     def _build_3channel_data(self, history_y: np.ndarray, history_rs: np.ndarray):
-        """Generates the 3-channel feature matrix using walk-forward HAR predictions."""
         self.har_model.fit(history_y, history_rs)
         har_preds = self.har_model.forecast(history_y, history_rs)
         har_resids = har_preds - history_rs
@@ -136,7 +128,6 @@ class WTDHARGRUWrapper(BasePyTorchVolatilityModel):
         return X, har_preds, har_resids
 
     def fit(self, y_train: np.ndarray, rs_train: np.ndarray | None = None) -> None:
-        """Overridden fit to handle the 3-channel hybrid input."""
         if rs_train is None:
             raise ValueError("rs_train must be provided.")
 
@@ -144,6 +135,8 @@ class WTDHARGRUWrapper(BasePyTorchVolatilityModel):
         self.rs_train_history = rs_train.copy()
         self.history["train_loss"] = []
         self.history["val_loss"] = []
+        self.history["ft_train_loss"] = []
+        self.history["ft_val_loss"] = []
 
         X, har_preds, har_resids = self._build_3channel_data(y_train, rs_train)
         self.train_har_preds = har_preds
@@ -218,9 +211,12 @@ class WTDHARGRUWrapper(BasePyTorchVolatilityModel):
 
         self.is_fitted = True
         self.is_valid = True
+        
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def forecast(self, y_seq: np.ndarray, rs_seq: np.ndarray | None = None, **kwargs) -> np.ndarray:
-        """Overridden forecast to generate HAR features on the fly with strict Walk-Forward."""
         if not self.is_fitted or not self.is_valid:
             raise RuntimeError("Model must be fitted before forecasting.")
         if rs_seq is None:
@@ -233,6 +229,8 @@ class WTDHARGRUWrapper(BasePyTorchVolatilityModel):
         history_har_preds = list(self.train_har_preds)
         history_har_resids = list(self.train_har_resids)
 
+        context_len = self.context_length
+
         for i in range(len(y_seq)):
             har_hist_y = np.array(history_y)
             har_hist_rs = np.array(history_rs)
@@ -244,12 +242,11 @@ class WTDHARGRUWrapper(BasePyTorchVolatilityModel):
             history_har_preds.append(har_pred)
             history_har_resids.append(har_resid)
 
-            window_y = np.array(history_y[-self.context_length:]) 
-            window_har = np.array(history_har_preds[-self.context_length-1 : -1])
-            window_resid = np.array(history_har_resids[-self.context_length-1 : -1])
+            window_y = np.array(history_y[-context_len:]) 
+            window_har = np.array(history_har_preds[-context_len-1 : -1])
+            window_resid = np.array(history_har_resids[-context_len-1 : -1])
 
             x_input = np.column_stack([window_y, window_har, window_resid])
-            
             x_input = (x_input - self.feature_mean) / self.feature_std
             x_tensor = torch.tensor(x_input, dtype=torch.float32).unsqueeze(0).to(self.device)
 
@@ -260,6 +257,84 @@ class WTDHARGRUWrapper(BasePyTorchVolatilityModel):
 
             history_y.append(y_seq[i])
             history_rs.append(rs_seq[i])
+
+            if i % self.retrain_freq == 0:
+                val_len = max(context_len + 1, min(30, len(history_y) - context_len - 1))
+                
+                if val_len > 0 and len(history_y) > val_len:
+                    X_hist = np.column_stack([history_y, history_har_preds, history_har_resids])
+                    
+                    X_ft_train = X_hist[:-val_len]
+                    X_ft_val = X_hist[-val_len:]
+                    
+                    rs_ft_train = np.array(history_rs[:-val_len]) * self.target_scale
+                    rs_ft_val = np.array(history_rs[-val_len:]) * self.target_scale
+
+                    X_ft_train = (X_ft_train - self.feature_mean) / self.feature_std
+                    X_ft_val = (X_ft_val - self.feature_mean) / self.feature_std
+
+                    ft_train_dataset = HARGRUDataset(X_ft_train, rs_ft_train, context_len)
+                    ft_val_dataset = HARGRUDataset(X_ft_val, rs_ft_val, context_len)
+
+                    if len(ft_train_dataset) > 0 and len(ft_val_dataset) > 0:
+                        ft_train_loader = DataLoader(ft_train_dataset, batch_size=self.batch_size, shuffle=False)
+                        ft_val_loader = DataLoader(ft_val_dataset, batch_size=self.batch_size, shuffle=False)
+
+                        optimizer = optim.Adam(self.net.parameters(), lr=self.params["learning_rate"], weight_decay=self.params.get("weight_decay", 0.0))
+                        scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5)
+
+                        self.net.train()
+                        best_ft_loss = float("inf")
+                        patience_counter = 0
+                        ft_converged = False
+                        best_ft_state_dict = None
+
+                        for epoch in range(self.max_epochs):
+                            self.net.train()
+                            ft_epoch_loss = 0.0
+                            for x_batch, y_batch in ft_train_loader:
+                                x_batch, y_batch = x_batch.to(self.device), y_batch.to(self.device)
+                                optimizer.zero_grad()
+                                loss = self.criterion(self.net(x_batch), y_batch)
+                                if torch.isnan(loss) or torch.isinf(loss):
+                                    raise RuntimeError("NaN/Inf loss detected during Fine-Tuning")
+                                loss.backward()
+                                torch_utils.clip_grad_norm_(self.net.parameters(), max_norm=1.0)
+                                optimizer.step()
+                                ft_epoch_loss += loss.item()
+                            ft_epoch_loss /= len(ft_train_loader)
+
+                            self.net.eval()
+                            ft_val_loss = 0.0
+                            with torch.no_grad():
+                                for x_batch, y_batch in ft_val_loader:
+                                    x_batch, y_batch = x_batch.to(self.device), y_batch.to(self.device)
+                                    ft_val_loss += self.criterion(self.net(x_batch), y_batch).item()
+                            ft_val_loss /= len(ft_val_loader)
+
+                            self.history["ft_train_loss"].append(ft_epoch_loss)
+                            self.history["ft_val_loss"].append(ft_val_loss)
+                            scheduler.step(ft_val_loss)
+
+                            if best_ft_loss - ft_val_loss > self.tolerance:
+                                best_ft_loss = ft_val_loss
+                                patience_counter = 0
+                                best_ft_state_dict = copy.deepcopy(self.net.state_dict())
+                            else:
+                                patience_counter += 1
+                                if patience_counter >= self.patience:
+                                    ft_converged = True
+                                    break
+
+                        if best_ft_state_dict is not None:
+                            self.net.load_state_dict(best_ft_state_dict)
+                        self.net.eval()
+
+            del x_tensor
+            if i % 5 == 0:
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
         predictions = np.array(predictions) / self.target_scale
         return predictions

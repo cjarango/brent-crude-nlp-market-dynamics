@@ -14,6 +14,7 @@ Visual Language
 ----------------
 - Consistent HTML tables with black borders and grey headers.
 - APA 7th edition formatting for p-values.
+- Optional left-alignment of the first column (controlled per call).
 - High-resolution SVG output for figures.
 
 Main Functionalities
@@ -33,7 +34,7 @@ Dependencies
 numpy, pandas, matplotlib, scipy, statsmodels, IPython
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 __author__ = (
     "Juan Camilo Mendoza Arango <cjarango@uninorte.edu.co>, "
@@ -66,27 +67,35 @@ __all__ = [
 # PUBLIC API
 # ===========================================================================
 
-def display_styled_df(df: pd.DataFrame, decimals: int = 3, p_value_cols: list | None = None) -> None:
+def display_styled_df(
+    df: pd.DataFrame,
+    decimals: int = 3,
+    p_value_cols: list | None = None,
+    align_left_first: bool = True,
+) -> None:
     """Renders any pandas DataFrame with the standard toolkit style.
 
     Args:
         df (pd.DataFrame): The DataFrame to display.
         decimals (int): Number of decimals for float statistics. Defaults to 3.
-        p_value_cols (list, optional): List of column names (or partial names) 
+        p_value_cols (list, optional): List of column names (or partial names)
             that contain p-values to be formatted in APA style. Defaults to None.
-            
+        align_left_first (bool, optional): If True, the first column (header and
+            cells) is left-aligned. If False, every column is centered.
+            Defaults to True.
+
     Returns:
         None: The table is rendered as HTML.
     """
     if p_value_cols is None:
         p_value_cols = []
-        
+
     df_display = df.copy()
     format_dict = {}
-    
+
     for col in df.columns:
         is_p_value = any(p_col in col for p_col in p_value_cols)
-        
+
         if is_p_value:
             format_dict[col] = lambda x: _format_apa_pvalue(x)
         elif pd.api.types.is_numeric_dtype(df[col]):
@@ -94,14 +103,14 @@ def display_styled_df(df: pd.DataFrame, decimals: int = 3, p_value_cols: list | 
                 format_dict[col] = "{:,.0f}"
             else:
                 format_dict[col] = f"{{:.{decimals}f}}"
-            
+
     styled = (
         df_display.style
         .hide(axis="index")
-        .set_table_styles(_table_style_rules())
+        .set_table_styles(_table_style_rules(align_left_first=align_left_first))
         .format(format_dict)
     )
-    
+
     _render_styled(styled)
 
 
@@ -113,15 +122,36 @@ def display_top_results(
     n_replicas: int = 5,
     aggregate_mode: str = "mean",
     column_names: list | tuple | None = None,
-    penalty_value: float = 5
+    penalty_value: float = 5,
+    align_left_first: bool = True,
 ) -> None:
-    """Loads training replicas, aggregates metrics, and displays the Top N configurations."""
+    """Loads training replicas, aggregates metrics, and displays the Top N configurations.
+
+    When only one replica is available on disk, the columns
+    ``Global (Mean ± SD)`` and ``Fail Rate (%)`` are omitted to avoid
+    redundant aggregations. Sorting in that case is done using the single
+    replica's aggregated center (across folds).
+
+    Args:
+        results_path (Path): Path to the experiment folder.
+        q_filter (list, optional): Restrict to specific ``q`` values. Defaults to None.
+        top_n (int): Number of top configurations to display. Defaults to 5.
+        decimals (int): Number of decimals in the formatted stats. Defaults to 3.
+        n_replicas (int): Number of replicas to scan. Defaults to 5.
+        aggregate_mode (str): "mean" or "median". Defaults to "mean".
+        column_names (list | tuple, optional): Custom header names.
+            Must match the final number of columns.
+        penalty_value (float): QLIKE value assigned to failed trials.
+            Defaults to 5.
+        align_left_first (bool, optional): Passed through to
+            :func:`display_styled_df`. Defaults to True.
+    """
     all_results = []
     for exec_id in range(1, n_replicas + 1):
         exec_dir = results_path / f"exec_{exec_id}"
         if not exec_dir.exists():
             continue
-        
+
         csv_files = list(exec_dir.glob("*_results.csv"))
         if csv_files:
             df_exec = pd.read_csv(csv_files[0])
@@ -145,48 +175,83 @@ def display_top_results(
     df_raw.loc[df_raw["is_failure"], "qlike"] = penalty_value
 
     ignore_cols = [
-        "fold", "train_size", "val_size", "exec_id", 
+        "fold", "train_size", "val_size", "exec_id",
         "qlike", "mse", "rmse", "mae", "crps", "pinball_05", "pinball_95",
-        "seed", "converged", "epochs_run", "train_time_sec", "is_failure"
+        "seed", "converged", "epochs_run", "train_time_sec", "is_failure",
     ]
-    
+
     group_cols = [c for c in df_raw.columns if c not in ignore_cols]
 
     def _aggregate_series(x):
         if aggregate_mode == "mean":
             return pd.Series({"center": x.mean(), "spread": x.std()})
-        return pd.Series({"center": x.median(), "spread": x.quantile(0.75) - x.quantile(0.25)})
+        return pd.Series({
+            "center": x.median(),
+            "spread": x.quantile(0.75) - x.quantile(0.25),
+        })
 
-    df_stats = df_raw.groupby(group_cols + ["exec_id"])["qlike"].apply(_aggregate_series).unstack().reset_index()
-    
-    df_failures = df_raw.groupby(group_cols + ["exec_id"])["is_failure"].any().reset_index()
+    df_stats = (
+        df_raw.groupby(group_cols + ["exec_id"])["qlike"]
+        .apply(_aggregate_series)
+        .unstack()
+        .reset_index()
+    )
+
+    df_failures = (
+        df_raw.groupby(group_cols + ["exec_id"])["is_failure"]
+        .any()
+        .reset_index()
+    )
     df_stats = df_stats.merge(df_failures, on=group_cols + ["exec_id"])
-    
+
     df_stats["formatted"] = df_stats.apply(
-        lambda r: f"{r['center']:.{decimals}f} ± {r['spread']:.{decimals}f}" + 
-                  ("*" if r['is_failure'] else ""), 
-        axis=1
+        lambda r: f"{r['center']:.{decimals}f} ± {r['spread']:.{decimals}f}"
+        + ("*" if r["is_failure"] else ""),
+        axis=1,
     )
 
     df_pivot = df_stats.pivot(index=group_cols, columns="exec_id", values="formatted")
     df_pivot.columns = [f"Replica {col}" for col in df_pivot.columns]
     df_pivot = df_pivot.fillna("-").reset_index()
 
-    df_global = df_stats.groupby(group_cols)["center"].apply(_aggregate_series).unstack().reset_index()
-    
-    agg_label = "Mean ± SD" if aggregate_mode == "mean" else "Median ± IQR"
-    df_global[f"Global ({agg_label})"] = df_global.apply(
-        lambda r: f"{r['center']:.{decimals}f} ± {r['spread']:.{decimals}f}" if pd.notna(r['center']) else "-", 
-        axis=1
-    )
-    
-    df_global["sort_val"] = df_global["center"]
-    failure_rates = df_raw.groupby(group_cols)["is_failure"].mean() * 100
-    df_global = df_global.merge(failure_rates.rename("Fail Rate (%)"), on=group_cols)
+    single_replica = df_stats["exec_id"].nunique() == 1
 
-    df_final = df_pivot.merge(df_global[group_cols + [f"Global ({agg_label})", "sort_val", "Fail Rate (%)"]], on=group_cols)
-    df_final = df_final.sort_values(by="sort_val", ascending=True)
-    
+    if single_replica:
+        # No 'Global' nor 'Fail Rate' columns: sort by the single replica's center.
+        df_sort = df_stats[group_cols + ["center"]].rename(
+            columns={"center": "sort_val"}
+        )
+        df_final = df_pivot.merge(df_sort, on=group_cols)
+        df_final = df_final.sort_values(by="sort_val", ascending=True)
+    else:
+        df_global = (
+            df_stats.groupby(group_cols)["center"]
+            .apply(_aggregate_series)
+            .unstack()
+            .reset_index()
+        )
+
+        agg_label = "Mean ± SD" if aggregate_mode == "mean" else "Median ± IQR"
+        df_global[f"Global ({agg_label})"] = df_global.apply(
+            lambda r: f"{r['center']:.{decimals}f} ± {r['spread']:.{decimals}f}"
+            if pd.notna(r["center"]) else "-",
+            axis=1,
+        )
+
+        df_global["sort_val"] = df_global["center"]
+        failure_rates = df_raw.groupby(group_cols)["is_failure"].mean() * 100
+        df_global = df_global.merge(
+            failure_rates.rename("Fail Rate (%)"), on=group_cols
+        )
+
+        df_final = df_pivot.merge(
+            df_global[
+                group_cols + [f"Global ({agg_label})", "sort_val", "Fail Rate (%)"]
+            ],
+            on=group_cols,
+        )
+        df_final = df_final.sort_values(by="sort_val", ascending=True)
+
     df_top = df_final.head(top_n).drop(columns=["sort_val"]).reset_index(drop=True)
 
     for col in ["q", "p", "o"]:
@@ -200,17 +265,17 @@ def display_top_results(
                 f"but the table has {len(df_top.columns)} columns."
             )
         df_top.columns = column_names
-    
-    display_styled_df(df_top)
-    
+
+    display_styled_df(df_top, align_left_first=align_left_first)
+
 
 def run_model_diagnostics(
-    std_residuals: np.ndarray, 
-    lags: tuple = (10, 20, 30), 
-    alpha: float = 0.05, 
+    std_residuals: np.ndarray,
+    lags: tuple = (10, 20, 30),
+    alpha: float = 0.05,
     p_adjust: str = "holm",
     column_titles: tuple | None = None,
-    english: bool = True
+    english: bool = True,
 ) -> pd.DataFrame:
     """Runs a battery of diagnostic tests on standardized residuals.
 
@@ -218,49 +283,74 @@ def run_model_diagnostics(
         std_residuals (np.ndarray): Standardized residuals from the model.
         lags (tuple): Lags for Ljung-Box and ARCH-LM. Defaults to (10, 20, 30).
         alpha (float): Significance level for conclusions. Defaults to 0.05.
-        p_adjust (str): Method for FWER control ('holm', 'bonferroni', etc.). 
+        p_adjust (str): Method for FWER control ('holm', 'bonferroni', etc.).
             Defaults to 'holm'.
-        column_titles (tuple, optional): Custom names for the output columns. 
+        column_titles (tuple, optional): Custom names for the output columns.
             If None, defaults are used based on the `english` parameter.
-        english (bool, optional): If True, outputs conclusions and default column 
+        english (bool, optional): If True, outputs conclusions and default column
             titles in English. If False, uses Spanish. Defaults to True.
-            
+
     Returns:
         pd.DataFrame: Formatted diagnostics table.
     """
     rows = []
-    
+
     lb_res = acorr_ljungbox(std_residuals, lags=list(lags), return_df=True)
     for lag in lags:
-        rows.append({"Test": f"Ljung-Box (Lag {lag})", "Stat": lb_res.loc[lag, "lb_stat"], "p_raw": lb_res.loc[lag, "lb_pvalue"], "Family": "LB"})
-        
+        rows.append({
+            "Test": f"Ljung-Box (Lag {lag})",
+            "Stat": lb_res.loc[lag, "lb_stat"],
+            "p_raw": lb_res.loc[lag, "lb_pvalue"],
+            "Family": "LB",
+        })
+
     for lag in lags:
         arch_res = het_arch(std_residuals, nlags=lag)
-        rows.append({"Test": f"ARCH-LM (Lag {lag})", "Stat": arch_res[0], "p_raw": arch_res[1], "Family": "ARCH"})
-        
+        rows.append({
+            "Test": f"ARCH-LM (Lag {lag})",
+            "Stat": arch_res[0],
+            "p_raw": arch_res[1],
+            "Family": "ARCH",
+        })
+
     jb_stat, jb_p = stats.jarque_bera(std_residuals)
-    rows.append({"Test": "Jarque-Bera", "Stat": jb_stat, "p_raw": jb_p, "Family": "Normality"})
-    
-    lf_stat, lf_p = lilliefors(std_residuals, dist='norm', pvalmethod='table')
-    rows.append({"Test": "Lilliefors", "Stat": lf_stat, "p_raw": lf_p, "Family": "Normality"})
-    
+    rows.append({
+        "Test": "Jarque-Bera",
+        "Stat": jb_stat,
+        "p_raw": jb_p,
+        "Family": "Normality",
+    })
+
+    lf_stat, lf_p = lilliefors(std_residuals, dist="norm", pvalmethod="table")
+    rows.append({
+        "Test": "Lilliefors",
+        "Stat": lf_stat,
+        "p_raw": lf_p,
+        "Family": "Normality",
+    })
+
     bds_res = bds(std_residuals, max_dim=2)
-    rows.append({"Test": "BDS (Dim 2)", "Stat": bds_res[0], "p_raw": bds_res[1], "Family": "BDS"})
-    
+    rows.append({
+        "Test": "BDS (Dim 2)",
+        "Stat": bds_res[0],
+        "p_raw": bds_res[1],
+        "Family": "BDS",
+    })
+
     df = pd.DataFrame(rows)
     df["p_adj"] = np.nan
-    
+
     for fam in df["Family"].unique():
         mask = df["Family"] == fam
         if fam in ["LB", "ARCH"] and mask.sum() > 1:
             _, p_adj, _, _ = multipletests(df.loc[mask, "p_raw"], method=p_adjust)
             df.loc[mask, "p_adj"] = p_adj
-            
+
     conclusions = []
     for _, row in df.iterrows():
         p = row["p_adj"] if pd.notna(row["p_adj"]) else row["p_raw"]
         test = row["Test"]
-        
+
         if english:
             if "Ljung-Box" in test:
                 concl = "No Autocorrelation" if p > alpha else "Significant Autocorrelation"
@@ -279,48 +369,48 @@ def run_model_diagnostics(
                 concl = "Sin Estructura No Lineal" if p > alpha else "Estructura No Lineal Significativa"
             else:
                 concl = "Residuos Normales" if p > alpha else "Residuos No Normales"
-                
+
         conclusions.append(concl)
-        
+
     df["Conclusion"] = conclusions
-    
+
     df_out = df[["Test", "Stat", "p_raw", "p_adj", "Conclusion"]].copy()
-    
+
     if column_titles is None:
         if english:
             column_titles = (
-                "Test", 
-                "Statistic", 
-                "p-value", 
-                f"p-adjusted ({p_adjust})", 
-                f"Conclusion (α={alpha})"
+                "Test",
+                "Statistic",
+                "p-value",
+                f"p-adjusted ({p_adjust})",
+                f"Conclusion (α={alpha})",
             )
         else:
             column_titles = (
-                "Prueba", 
-                "Estadístico", 
-                "p-valor", 
-                f"p-ajustado ({p_adjust})", 
-                f"Conclusión (α={alpha})"
+                "Prueba",
+                "Estadístico",
+                "p-valor",
+                f"p-ajustado ({p_adjust})",
+                f"Conclusión (α={alpha})",
             )
-        
+
     if len(column_titles) != 5:
         raise ValueError("column_titles must be a tuple of exactly 5 strings.")
-        
+
     df_out.columns = column_titles
-    
+
     return df_out
 
 
 def plot_metric_evolution(
-    results_path: str, 
-    x_col: str = "q", 
+    results_path: str,
+    x_col: str = "q",
     hue_col: str = "dist",
     metric: str = "qlike",
     aggregate_mode: str = "mean",
-    title: str = "Metric Evolution by Hyperparameters", 
-    xlab: str | None = None, 
-    ylab: str | None = None, 
+    title: str = "Metric Evolution by Hyperparameters",
+    xlab: str | None = None,
+    ylab: str | None = None,
     ylim: tuple | None = None,
     y_step: float | None = None,
     legend_title: str | None = None,
@@ -331,7 +421,7 @@ def plot_metric_evolution(
     legend_size: float = 12,
     figsize: tuple = (10, 6),
     fmt: str = "svg",
-    dpi: int = 100
+    dpi: int = 100,
 ) -> None:
     """Generates an evolution plot for a metric across hyperparameters.
 
@@ -369,7 +459,7 @@ def plot_metric_evolution(
         return
 
     df_raw = pd.concat(all_results, ignore_index=True)
-    
+
     if xlab is None:
         xlab = x_col
     if ylab is None:
@@ -386,8 +476,8 @@ def plot_metric_evolution(
     elif aggregate_mode == "median":
         df_exec_agg = df_raw.groupby([x_col, hue_col, "exec_id"])[metric].median().reset_index()
         df_plot = df_exec_agg.groupby([x_col, hue_col])[metric].agg(
-            center="median", 
-            spread=lambda x: x.quantile(0.75) - x.quantile(0.25)
+            center="median",
+            spread=lambda x: x.quantile(0.75) - x.quantile(0.25),
         ).reset_index()
         df_plot["err"] = df_plot["spread"]
     else:
@@ -402,11 +492,11 @@ def plot_metric_evolution(
     for hue_val in df_plot[hue_col].unique():
         subset = df_plot[df_plot[hue_col] == hue_val]
         ax.errorbar(
-            x=subset[x_col], y=subset["center"], yerr=subset["err"], 
+            x=subset[x_col], y=subset["center"], yerr=subset["err"],
             label=hue_val, color=colors.get(hue_val, "black"),
             linestyle=linestyles.get(hue_val, "-"), marker=markers.get(hue_val, "o"),
-            markersize=6, linewidth=1.5, capsize=4, capthick=1.0, 
-            elinewidth=1.0, ecolor=colors.get(hue_val, "black")
+            markersize=6, linewidth=1.5, capsize=4, capthick=1.0,
+            elinewidth=1.0, ecolor=colors.get(hue_val, "black"),
         )
 
     pad_x, pad_y, pad_title = pads
@@ -425,13 +515,15 @@ def plot_metric_evolution(
         spine.set_color("black")
         spine.set_linewidth(0.8)
 
-    ax.tick_params(axis="both", which="both", labelsize=tick_size, direction="out", length=4, width=0.8, colors="black")
-    
+    ax.tick_params(axis="both", which="both", labelsize=tick_size, direction="out",
+                   length=4, width=0.8, colors="black")
+
     unique_x = sorted(df_plot[x_col].unique())
     ax.set_xticks(unique_x)
-    
+
     ax.margins(x=0.05, y=0.10)
-    ax.legend(title=legend_title, title_fontsize=legend_size + 1, fontsize=legend_size, frameon=False, loc="upper right")
+    ax.legend(title=legend_title, title_fontsize=legend_size + 1,
+              fontsize=legend_size, frameon=False, loc="upper right")
     ax.grid(False)
     plt.tight_layout()
 
@@ -439,12 +531,19 @@ def plot_metric_evolution(
         buf = io.BytesIO()
         fig.savefig(buf, format="svg", bbox_inches="tight")
         plt.close(fig)
-        display(HTML(f'<div style="display: flex; justify-content: center; width: 100%;">{buf.getvalue().decode("utf-8")}</div>'))
+        display(HTML(
+            f'<div style="display: flex; justify-content: center; width: 100%;">'
+            f'{buf.getvalue().decode("utf-8")}</div>'
+        ))
     else:
         buf = io.BytesIO()
         fig.savefig(buf, format="png", bbox_inches="tight", dpi=dpi)
         plt.close(fig)
-        display(HTML(f'<div style="text-align: center; width: 100%;"><img src="data:image/png;base64,{base64.b64encode(buf.getbuffer()).decode("ascii")}"></div>'))
+        display(HTML(
+            f'<div style="text-align: center; width: 100%;">'
+            f'<img src="data:image/png;base64,{base64.b64encode(buf.getbuffer()).decode("ascii")}">'
+            f'</div>'
+        ))
 
 
 # ===========================================================================
@@ -461,15 +560,40 @@ def _format_apa_pvalue(val: float) -> str:
     return formatted[1:] if formatted.startswith("0.") else formatted
 
 
-def _table_style_rules() -> list:
-    """Return the shared HTML style rules used by every styled table."""
-    return [
-        {'selector': '', 'props': [('margin-left', 'auto'), ('margin-right', 'auto'), ('width', 'auto'), ('border-collapse', 'collapse')]},
-        {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#f2f2f2'), ('color', 'black'), ('font-weight', 'bold'), ('border', '1px solid black'), ('padding', '10px')]},
-        {'selector': 'td', 'props': [('text-align', 'center'), ('border', '1px solid black'), ('padding', '10px')]},
-        {'selector': 'th:first-child', 'props': [('text-align', 'left')]},
-        {'selector': 'td:first-child', 'props': [('text-align', 'left')]}
+def _table_style_rules(align_left_first: bool = True) -> list:
+    """Return the shared HTML style rules used by every styled table.
+
+    Args:
+        align_left_first (bool): If True, adds rules to left-align the first
+            column (header and cells). Defaults to True.
+    """
+    rules = [
+        {"selector": "", "props": [
+            ("margin-left", "auto"),
+            ("margin-right", "auto"),
+            ("width", "auto"),
+            ("border-collapse", "collapse"),
+        ]},
+        {"selector": "th", "props": [
+            ("text-align", "center"),
+            ("background-color", "#f2f2f2"),
+            ("color", "black"),
+            ("font-weight", "bold"),
+            ("border", "1px solid black"),
+            ("padding", "10px"),
+        ]},
+        {"selector": "td", "props": [
+            ("text-align", "center"),
+            ("border", "1px solid black"),
+            ("padding", "10px"),
+        ]},
     ]
+    if align_left_first:
+        rules.extend([
+            {"selector": "th:first-child", "props": [("text-align", "left")]},
+            {"selector": "td:first-child", "props": [("text-align", "left")]},
+        ])
+    return rules
 
 
 def _render_styled(styler) -> None:
