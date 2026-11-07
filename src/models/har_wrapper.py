@@ -12,6 +12,7 @@ import numpy as np
 import optuna
 import pandas as pd
 import statsmodels.api as sm
+from tqdm.auto import tqdm
 
 from src.models.base import BaseVolatilityModel
 
@@ -19,7 +20,6 @@ __all__ = ["HARWrapper"]
 
 
 class HARWrapper(BaseVolatilityModel):
-    """Wrapper for the Heterogeneous Autoregressive (HAR) model."""
 
     @staticmethod
     def suggest_params(trial: optuna.Trial) -> dict:
@@ -90,16 +90,16 @@ class HARWrapper(BaseVolatilityModel):
         for i in range(len(y_seq)):
             try:
                 df_hist = self._build_features(np.array(history_y))
-                X_pred = df_hist.iloc[-1][['RV_d', 'RV_w', 'RV_m']]
+                X_pred = df_hist[['RV_d', 'RV_w', 'RV_m']].iloc[[-1]]
                 X_pred = sm.add_constant(X_pred, has_constant='add')
                 
                 X_hist = df_hist[['RV_d', 'RV_w', 'RV_m']]
                 y_hist = np.array(history_rs[self.lag_monthly:])
                 X_hist = sm.add_constant(X_hist)
-                local_fit = sm.OLS(y_hist, X_hist).fit()
                 
+                local_fit = sm.OLS(y_hist, X_hist).fit()
                 pred = local_fit.predict(X_pred).iloc[0]
-                predictions.append(max(pred, 1e-8))
+                predictions.append(max(pred, 1e-8)) 
                 
             except Exception as e:  # noqa: BLE001
                 if len(predictions) > 0:
@@ -111,9 +111,6 @@ class HARWrapper(BaseVolatilityModel):
 
             history_y.append(y_seq[i])
             history_rs.append(rs_seq[i])
-
-            if debug:
-                print(f"[DEBUG] pred i={i:03d} | y={y_seq[i]:+.6f} | pred={predictions[-1]:.6e}")
 
         predictions = np.array(predictions)
         if save_dir is not None:
@@ -127,8 +124,11 @@ class HARWrapper(BaseVolatilityModel):
             "class": self.__class__.__name__,
             "params": {"lag_weekly": self.lag_weekly, "lag_monthly": self.lag_monthly},
             "saved_at_utc": datetime.now(UTC).isoformat(),
+            "fit_diagnostics": self.get_diagnostics(),
         }
-        if extra_metadata: metadata.update(extra_metadata)
+        if extra_metadata: 
+            metadata.update(extra_metadata)
+            
         (save_path / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
         pd.DataFrame({
             "step": range(len(predictions)),
@@ -138,8 +138,84 @@ class HARWrapper(BaseVolatilityModel):
         }).to_csv(save_path / "walk_forward_predictions.csv", index=False)
 
     def get_diagnostics(self) -> dict:
-        if not self.is_fitted: return {}
-        return {"r_squared": self.model_fit.rsquared, "converged": True, "epochs_run": 0}
+        if not self.is_fitted: 
+            return {}
+        return {
+            "r_squared": self.model_fit.rsquared, 
+            "converged": True, 
+            "epochs_run": 1
+        }
 
     def get_history(self) -> dict:
         return {"train_loss": [], "val_loss": []}
+
+    def get_parameter_table(
+        self, 
+        B: int = 0, 
+        decimals: int = 4, 
+        block_size: int = 22,
+        verbose: bool = False
+    ) -> pd.DataFrame:
+        if not self.is_fitted:
+            raise RuntimeError("Model must be successfully fitted to extract parameters.")
+
+        params = self.model_fit.params
+        std_err = self.model_fit.bse
+        pvalues = self.model_fit.pvalues
+
+        if B > 0:
+            ci_lower, ci_upper = self._block_bootstrap_ci(B, block_size, verbose)
+            lower_vals = [ci_lower[p] for p in params.index]
+            upper_vals = [ci_upper[p] for p in params.index]
+        else:
+            conf_int = self.model_fit.conf_int()
+            lower_vals = conf_int.iloc[:, 0].values
+            upper_vals = conf_int.iloc[:, 1].values
+
+        df = pd.DataFrame({
+            "Parameter": params.index,
+            "Coef": params.values,
+            "Std. Error": std_err.values,
+            "P-value": pvalues.values,
+            "CI Lower": lower_vals,
+            "CI Upper": upper_vals
+        })
+
+        return df.round(decimals)
+    
+    def _block_bootstrap_ci(self, B: int, block_size: int, verbose: bool) -> tuple[dict, dict]:
+        y_hat = np.asarray(self.model_fit.fittedvalues)
+        resid = np.asarray(self.model_fit.resid)
+        X = np.asarray(self.model_fit.model.exog)
+        params_names = self.model_fit.params.index
+        
+        n = len(resid)
+        n_blocks = int(np.ceil(n / block_size))
+        
+        boot_params = {p: [] for p in params_names}
+        
+        for _ in tqdm(range(B), desc="Block Bootstrap", leave=False, disable=not verbose):
+            starts = np.random.randint(0, n - block_size + 1, size=n_blocks)
+            boot_resid = np.concatenate([resid[s:s+block_size] for s in starts])[:n]
+            
+            y_boot = y_hat + boot_resid
+            
+            try:
+                beta, _, _, _ = np.linalg.lstsq(X, y_boot, rcond=None)
+                for i, p in enumerate(params_names):
+                    boot_params[p].append(beta[i])
+            except Exception:  # noqa: BLE001, S112
+                continue
+                
+        ci_lower = {}
+        ci_upper = {}
+        for p in params_names:
+            vals = np.array(boot_params[p])
+            if len(vals) > 0:
+                ci_lower[p] = np.percentile(vals, 2.5)
+                ci_upper[p] = np.percentile(vals, 97.5)
+            else:
+                ci_lower[p] = np.nan
+                ci_upper[p] = np.nan
+                
+        return ci_lower, ci_upper

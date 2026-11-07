@@ -112,10 +112,13 @@ class WalkForwardTrainer:
             df = pd.read_csv(self.csv_path)
             for k, v in params.items():
                 df = df[df[k] == v]
+            total_time = df["train_time_sec"].sum()
+            trial.set_user_attr("train_time_sec", round(total_time, 2))
             return float(df["qlike"].mean())
 
         fold_qlikes = []
         all_converged = True
+        total_train_time = 0.0
 
         for i, (train_start, train_end, val_start, val_end) in enumerate(
             folds[completed_folds:]
@@ -141,6 +144,7 @@ class WalkForwardTrainer:
                 start_fold_time = time.time()
                 model.fit(y_train, rs_train)
                 train_time = time.time() - start_fold_time
+                total_train_time += train_time
 
                 diag = model.get_diagnostics()
                 converged = diag.get("converged", True)
@@ -196,6 +200,7 @@ class WalkForwardTrainer:
                 raise optuna.TrialPruned()
 
         trial.set_user_attr("converged", all_converged)
+        trial.set_user_attr("train_time_sec", round(total_train_time, 2))  # <--- NUEVO: Guardamos en Optuna
         return float(np.mean(fold_qlikes))
 
     def run(self, y: np.ndarray, rs: np.ndarray) -> None:
@@ -227,7 +232,6 @@ class WalkForwardTrainer:
             if remaining_trials > 0:
                 callbacks = []
                 if self.early_stop_rounds is not None:
-                    # Envolver nuestra función personalizada con el parámetro patience
                     callback = functools.partial(
                         _early_stopping_callback, 
                         patience=self.early_stop_rounds
@@ -260,6 +264,10 @@ class WalkForwardTrainer:
             mlflow.log_metric(
                 "best_trial_converged",
                 int(best_trial.user_attrs.get("converged", True)),
+            )
+            mlflow.log_metric(
+                "best_trial_train_time_sec", 
+                best_trial.user_attrs.get("train_time_sec", 0.0)
             )
 
             self.logger.warning(

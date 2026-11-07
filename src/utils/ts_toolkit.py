@@ -595,8 +595,10 @@ def plot_distribution_fit(
     Args:
         series (pandas.Series): Input series. NaNs are dropped before
             fitting and plotting.
-        dist ({"normal", "t"}): Distribution to fit and display.
-            Defaults to ``"t"``.
+        dist ({"normal", "t", "none"}): Distribution to fit and display.
+            Defaults to ``"t"``. If ``"none"``, the empirical histogram 
+            is plotted without a fitted density line, but the Q-Q plot 
+            is still generated against a standard Normal distribution.
         params (dict, optional): Dictionary with the distribution parameters.
             If ``None``, they are estimated via Maximum Likelihood.
         param_labels (dict, optional): Custom labels for the distribution
@@ -638,7 +640,7 @@ def plot_distribution_fit(
 
     Raises:
         TypeError: If ``series`` has no ``dropna`` method.
-        ValueError: If ``series`` is empty after dropping NaNs, or if ``dist`` is not one of ``{"normal", "t"}``.
+        ValueError: If ``series`` is empty after dropping NaNs, or if ``dist`` is not one of ``{"normal", "t", "none"}``.
     """
     if not hasattr(series, "dropna"):
         raise TypeError(
@@ -650,8 +652,8 @@ def plot_distribution_fit(
     if len(series) == 0:
         raise ValueError("'series' is empty after dropping NaNs.")
 
-    if dist not in ("normal", "t"):
-        raise ValueError(f"'dist' must be 'normal' or 't', got '{dist}'.")
+    if dist not in ("normal", "t", "none"):
+        raise ValueError(f"'dist' must be 'normal', 't', or 'none', got '{dist}'.")
 
     if param_labels is None:
         param_labels = _DEFAULT_PARAM_LABELS
@@ -663,10 +665,18 @@ def plot_distribution_fit(
 
     n = len(series)
     x_min, x_max = float(series.min()), float(series.max())
-    x = np.linspace(x_min, x_max, 1000)
     p = (np.arange(1, n + 1) - 0.5) / n
+    
+    pdf = None
+    legend_label = None
 
-    if dist == "normal":
+    if dist == "none":
+        theoretical_q = stats.norm.ppf(p)
+        if titles is None:
+            titles = ("Histograma de Residuos", "Q-Q Plot (Normal Estándar)")
+            
+    elif dist == "normal":
+        x = np.linspace(x_min, x_max, 1000)
         if params is not None:
             mu = params["mu"]
             sigma = params["sigma"]
@@ -678,7 +688,9 @@ def plot_distribution_fit(
         legend_label = f"Normal ({param_labels.get('mu', 'μ')} = {mu:.4f}, {param_labels.get('sigma', 'σ')} = {sigma:.4f})"
         if titles is None:
             titles = ("Histograma y Densidad Normal", "Q-Q Plot (Normal)")
-    else:
+            
+    else: # dist == "t"
+        x = np.linspace(x_min, x_max, 1000)
         if params is not None:
             nu = params["nu"]
             loc = params["loc"]
@@ -709,7 +721,10 @@ def plot_distribution_fit(
         series, bins=bins, density=True, color="white", edgecolor="black",
         linewidth=0.5, alpha=0.7, label="Datos"
     )
-    ax1.plot(x, pdf, color="black", linewidth=line_width, label=legend_label)
+    if pdf is not None:
+        ax1.plot(x, pdf, color="black", linewidth=line_width, label=legend_label)
+        ax1.legend(frameon=False, fontsize=tick_size, loc=legend_loc)
+
     ax1.set_title(titles[0], fontsize=title_size, pad=pad_title)
     ax1.set_xlabel(xlab, fontsize=label_size, labelpad=pad_x)
     ax1.set_ylabel(ylab_left, fontsize=label_size, labelpad=pad_y)
@@ -718,9 +733,7 @@ def plot_distribution_fit(
         ax1.set_ylim(ylim_left)
     if y_step_left is not None:
         ax1.yaxis.set_major_locator(plt.MultipleLocator(y_step_left))
-
-    ax1.legend(frameon=False, fontsize=tick_size, loc=legend_loc)
-
+        
     ax2.scatter(
         theoretical_q, sample_q,
         color="black", s=marker_size, alpha=marker_alpha,

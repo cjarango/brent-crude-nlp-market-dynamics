@@ -10,6 +10,7 @@ __version__ = "1.4.0"
 import optuna
 import torch.nn as nn
 import torch.nn.functional as F
+
 from src.models.dl_base import BasePyTorchVolatilityModel
 
 __all__ = ["LSTMModel"]

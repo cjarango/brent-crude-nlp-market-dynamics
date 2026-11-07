@@ -134,6 +134,7 @@ class MSWT_LSTMModel(BasePyTorchVolatilityModel):
         return self.params["look_back"]
 
     def _precompute(self, series: np.ndarray) -> np.ndarray:
+        """Precomputa bandas DWT a partir de una serie **ya escalada**."""
         return _precompute_bands(
             series,
             self.context_length,
@@ -145,13 +146,23 @@ class MSWT_LSTMModel(BasePyTorchVolatilityModel):
         if rs_train is None:
             raise ValueError("rs_train must be provided.")
 
-        self.y_train_history = y_train.copy()
-        self.rs_train_history = rs_train.copy()
         self.history["train_loss"] = []
         self.history["val_loss"] = []
 
         split_idx = int(len(y_train) * 0.8)
-        y_tr, y_val = y_train[:split_idx], y_train[split_idx:]
+        y_tr_raw = y_train[:split_idx]
+        y_val_raw = y_train[split_idx:]
+
+        self.scaler.fit(y_tr_raw.reshape(-1, 1))
+
+        y_tr = self.scaler.transform(y_tr_raw.reshape(-1, 1)).flatten()
+        y_val = self.scaler.transform(y_val_raw.reshape(-1, 1)).flatten()
+
+        self.y_train_history = self.scaler.transform(
+            y_train.reshape(-1, 1)
+        ).flatten()
+        self.rs_train_history = rs_train.copy() 
+
         rs_tr = rs_train[:split_idx] * self.target_scale
         rs_val = rs_train[split_idx:] * self.target_scale
 
@@ -217,7 +228,7 @@ class MSWT_LSTMModel(BasePyTorchVolatilityModel):
 
         self.diagnostics["converged"] = converged
         self.diagnostics["epochs_run"] = epochs_run
-        
+
         if self.best_state_dict is not None:
             self.net.load_state_dict(self.best_state_dict)
 
@@ -242,7 +253,9 @@ class MSWT_LSTMModel(BasePyTorchVolatilityModel):
         history_y = list(self.y_train_history)
         history_rs = list(self.rs_train_history * self.target_scale)
 
-        full = np.concatenate([self.y_train_history, y_seq])
+        y_seq_scaled = self.scaler.transform(y_seq.reshape(-1, 1)).flatten()
+
+        full = np.concatenate([self.y_train_history, y_seq_scaled])
         full_bands = self._precompute(full)
         n_train = len(self.y_train_history)
 
@@ -258,10 +271,18 @@ class MSWT_LSTMModel(BasePyTorchVolatilityModel):
                 pred = self.net(x_tensor).item()
             predictions.append(pred)
 
-            actual_y = y_seq[i]
+            actual_y_scaled = y_seq_scaled[i]
             actual_rs = rs_seq[i] * self.target_scale
 
-            history_y.append(actual_y)
+            if debug:
+                print(
+                    f"[DEBUG] i={i:03d} | y_raw={y_seq[i]:+.6f} | "
+                    f"y_scaled={actual_y_scaled:+.6f} | "
+                    f"rs={actual_rs/self.target_scale:.6e} | "
+                    f"pred={pred/self.target_scale:.6e}"
+                )
+
+            history_y.append(actual_y_scaled)
             history_rs.append(actual_rs)
 
             if i % self.retrain_freq == 0:
@@ -272,6 +293,7 @@ class MSWT_LSTMModel(BasePyTorchVolatilityModel):
                     y_ft_val = np.array(history_y[-val_len:])
                     rs_ft_val = np.array(history_rs[-val_len:])
 
+                    # Bandas DWT sobre series ya escaladas
                     bands_ft_train = self._precompute(y_ft_train)
                     bands_ft_val = self._precompute(y_ft_val)
 
@@ -314,7 +336,9 @@ class MSWT_LSTMModel(BasePyTorchVolatilityModel):
                                 optimizer.zero_grad()
                                 loss = self.criterion(self.net(x_batch), y_batch)
                                 if torch.isnan(loss) or torch.isinf(loss):
-                                    raise RuntimeError("NaN/Inf loss during fine-tuning")
+                                    raise RuntimeError(
+                                        "NaN/Inf loss during fine-tuning"
+                                    )
                                 loss.backward()
                                 torch_utils.clip_grad_norm_(
                                     self.net.parameters(), max_norm=1.0

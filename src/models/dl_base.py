@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn.utils as torch_utils
+from sklearn.preprocessing import StandardScaler
 from torch import optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
@@ -52,6 +53,8 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
         self.best_state_dict = None
         self.seed = seed
         self.target_scale = target_scale 
+        
+        self.scaler = StandardScaler()
 
         self.diagnostics = {"converged": False, "epochs_run": 0}
 
@@ -80,15 +83,21 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
         if rs_train is None:
             raise ValueError("rs_train (Rogers-Satchell targets) must be provided.")
 
-        self.y_train_history = y_train.copy()
-        self.rs_train_history = rs_train.copy()
-
         self.history["train_loss"] = []
         self.history["val_loss"] = []
 
         split_idx = int(len(y_train) * 0.8)
-        y_tr, y_val = y_train[:split_idx], y_train[split_idx:]
         
+        y_tr_raw = y_train[:split_idx]
+        y_val_raw = y_train[split_idx:]
+        self.scaler.fit(y_tr_raw.reshape(-1, 1))
+        
+        y_tr = self.scaler.transform(y_tr_raw.reshape(-1, 1)).flatten()
+        y_val = self.scaler.transform(y_val_raw.reshape(-1, 1)).flatten()
+        
+        self.y_train_history = self.scaler.transform(y_train.reshape(-1, 1)).flatten()
+        self.rs_train_history = rs_train.copy()
+
         rs_tr = rs_train[:split_idx] * self.target_scale
         rs_val = rs_train[split_idx:] * self.target_scale
 
@@ -189,10 +198,7 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
         predictions = []
 
         history_y = list(self.y_train_history)
-        
-        # --- FIX: Escalamos la historia inicial de varianzas ---
         history_rs = list(self.rs_train_history * self.target_scale)
-        # -------------------------------------------------------
 
         for i in range(len(y_seq)):
             current_window = np.array(history_y[-context_len:])
@@ -207,14 +213,13 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
                 pred = self.net(x_tensor).item()
             predictions.append(pred)
 
-            actual_y = y_seq[i]
+            actual_y_raw = y_seq[i]
             
-            # --- FIX: Escalamos la varianza real del día ---
+            actual_y = self.scaler.transform([[actual_y_raw]])[0, 0]
             actual_rs = rs_seq[i] * self.target_scale
-            # ------------------------------------------------
 
             if debug:
-                print(f"[DEBUG] pred i={i:03d} | y={actual_y:+.6f} | rs={actual_rs/self.target_scale:.6e} | pred={pred/self.target_scale:.6e}")
+                print(f"[DEBUG] pred i={i:03d} | y_raw={actual_y_raw:+.6f} | y_scaled={actual_y:+.6f} | rs={actual_rs/self.target_scale:.6e} | pred={pred/self.target_scale:.6e}")
 
             history_y.append(actual_y)
             history_rs.append(actual_rs)
@@ -298,9 +303,7 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
 
                         self.net.eval()
 
-        # --- FIX: Des-escalamos las predicciones para devolverlas en la escala original (RS) ---
         predictions = np.array(predictions) / self.target_scale
-        # --------------------------------------------------------------------------------------
 
         if save_dir is not None:
             self._save_artifact(
@@ -350,7 +353,7 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
                 "test_input": len(y_seq),
                 "predictions": len(predictions),
             },
-            "preprocessing": {"target_scale": self.target_scale},
+            "preprocessing": {"target_scale": self.target_scale, "input_scaler": "StandardScaler"},
             "data_hash": None,
             "validation_metrics": {},
             "test_metrics": {},

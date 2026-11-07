@@ -68,7 +68,9 @@ project:
     title: "Modelo GARCH"
   - file: notebooks/05_egarch_model.ipynb
     title: "Modelo EGARCH"
-  - file: notebooks/06_gru_model.ipynb
+  - file: notebooks/06_har_model.ipynb
+    title: "Modelo HAR"
+  - file: notebooks/08_gru_model.ipynb
     title: "Gated Recurrent Unit"
 
 site:
