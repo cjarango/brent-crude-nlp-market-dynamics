@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="http://localhost:3000/sitemap_style.xsl" ?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>http://localhost:3000</loc>
+  </url>
+  <url>
+    <loc>http://localhost:3000/systematic-literature-review</loc>
+  </url>
+  <url>
+    <loc>http://localhost:3000/experimental-design</loc>
+  </url>
+  <url>
+    <loc>http://localhost:3000/exploratory-data-analysis</loc>
+  </url>
+  <url>
+    <loc>http://localhost:3000/garch-model</loc>
+  </url>
+  <url>
+    <loc>http://localhost:3000/egarch-model</loc>
+  </url>
+  <url>
+    <loc>http://localhost:3000/har-model</loc>
+  </url>
+  <url>
+    <loc>http://localhost:3000/gru-model</loc>
+  </url>
+</urlset>
