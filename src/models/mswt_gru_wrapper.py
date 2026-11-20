@@ -191,29 +191,29 @@ class MSWTGRUMLPModel(BasePyTorchVolatilityModel):
 
     @staticmethod
     def suggest_params(trial: optuna.Trial) -> dict:
-        mlp_map: dict[str, str] = {
-            "32": "32",
-            "64": "64",
-            "128": "128",
-            "32_32": "32_32",
-            "32_64": "32_64",
-            "32_128": "32_128",
-            "64_32": "64_32",
-            "64_64": "64_64",
-            "64_128": "64_128",
-            "128_32": "128_32",
-            "128_64": "128_64",
-            "128_128": "128_128",
-        }
-        mlp_choice = trial.suggest_categorical("mlp_arch", list(mlp_map.keys()))
+        mlp_archs = [
+            "32",
+            "64",
+            "128",
+            "32_32",
+            "32_64",
+            "32_128",
+            "64_32",
+            "64_64",
+            "64_128",
+            "128_32",
+            "128_64",
+            "128_128",
+        ]
+        mlp_choice = trial.suggest_categorical("mlp_arch", mlp_archs)
 
         return {
             "look_back": trial.suggest_categorical("look_back", [7, 14, 21, 28]),
             "wavelet": "db4",
-            "J": trial.suggest_categorical("J", [1, 2, 3]),
+            "J": trial.suggest_categorical("J", [1, 2, 3, 4]),
             "hidden_size": trial.suggest_categorical("hidden_size", [32, 64, 128]),
             "num_layers": trial.suggest_int("num_layers", 1, 2),
-            "mlp_hidden_units": mlp_map[mlp_choice],
+            "mlp_hidden_units": mlp_choice,
             "activation": trial.suggest_categorical("activation", ["gelu", "silu", "relu"]),
             "gru_dropout": trial.suggest_float("gru_dropout", 0.0, 0.3),
             "mlp_dropout": trial.suggest_float("mlp_dropout", 0.0, 0.3),
@@ -286,6 +286,7 @@ class MSWTGRUMLPModel(BasePyTorchVolatilityModel):
         self.fine_tune_epochs = (
             fine_tune_epochs if fine_tune_epochs is not None else self.max_epochs
         )
+        self._band_cache: dict[int, np.ndarray] = {}
 
     @property
     def context_length(self) -> int:
@@ -299,32 +300,59 @@ class MSWTGRUMLPModel(BasePyTorchVolatilityModel):
             decomp_window=self.params["decomp_window"],
         )
 
+    def _cached_bands_for_prefix(self, arr: np.ndarray, offset: int = 0) -> np.ndarray:
+        """Returns causal bands for `arr`, caching each step `offset + t`."""
+        n_samples = len(arr)
+        wavelet = self.params["wavelet"]
+        J = self.params["J"]
+        eff_win = self.params["decomp_window"]
+        min_len = min_window_length(wavelet, J)
+        if n_samples < min_len:
+            raise ValueError(
+                f"Series length ({n_samples}) < min_window_length({wavelet}, {J})={min_len}."
+            )
+
+        out = np.zeros((n_samples, J + 1), dtype=np.float32)
+        for t in range(n_samples):
+            global_t = offset + t
+            if global_t in self._band_cache:
+                out[t] = self._band_cache[global_t]
+            else:
+                start = max(0, t + 1 - eff_win)
+                window = arr[start : t + 1]
+                if len(window) < min_len:
+                    window = np.pad(window, (min_len - len(window), 0), mode="edge")
+                val = _step_causal_bands(window, wavelet=wavelet, J=J)
+                self._band_cache[global_t] = val
+                out[t] = val
+        return out
+
     def fit(self, y_train: np.ndarray, rs_train: np.ndarray | None = None) -> None:
         if rs_train is None:
             raise ValueError("rs_train must be provided.")
 
         self.history["train_loss"] = []
         self.history["val_loss"] = []
+        self._band_cache.clear()
 
         split_idx = int(len(y_train) * 0.8)
         y_tr_raw = y_train[:split_idx]
-        y_val_raw = y_train[split_idx:]
 
         self.scaler.fit(y_tr_raw.reshape(-1, 1))
 
-        y_tr = self.scaler.transform(y_tr_raw.reshape(-1, 1)).flatten()
-        y_val = self.scaler.transform(y_val_raw.reshape(-1, 1)).flatten()
-
-        self.y_train_history = self.scaler.transform(
-            y_train.reshape(-1, 1)
-        ).flatten()
+        y_all_scaled = self.scaler.transform(y_train.reshape(-1, 1)).flatten()
+        self.y_train_history = y_all_scaled.copy()
         self.rs_train_history = rs_train.copy()
 
-        rs_tr = rs_train[:split_idx] * self.target_scale
-        rs_val = rs_train[split_idx:] * self.target_scale
+        bands_all = self._causal_bands(y_all_scaled)
+        rs_all_scaled = rs_train * self.target_scale
 
-        bands_tr = self._causal_bands(y_tr)
-        bands_val = self._causal_bands(y_val)
+        bands_tr = bands_all[:split_idx]
+        rs_tr = rs_all_scaled[:split_idx]
+
+        val_start_with_ctx = max(0, split_idx - self.context_length)
+        bands_val = bands_all[val_start_with_ctx:]
+        rs_val = rs_all_scaled[val_start_with_ctx:]
 
         train_dataset = CausalBandWindowDataset(bands_tr, rs_tr, self.context_length)
         val_dataset = CausalBandWindowDataset(bands_val, rs_val, self.context_length)
@@ -406,6 +434,10 @@ class MSWTGRUMLPModel(BasePyTorchVolatilityModel):
             raise ValueError("rs_seq must be provided.")
 
         self.net.eval()
+        self.history.setdefault("ft_train_loss", [])
+        self.history.setdefault("ft_val_loss", [])
+        self._band_cache.clear()
+
         context_len = self.context_length
         predictions: list[float] = []
 
@@ -416,7 +448,7 @@ class MSWTGRUMLPModel(BasePyTorchVolatilityModel):
 
         for i in range(len(y_seq)):
             arr_so_far = np.asarray(history_y, dtype=np.float64)
-            bands_so_far = self._causal_bands(arr_so_far)
+            bands_so_far = self._cached_bands_for_prefix(arr_so_far, offset=0)
             current_window = bands_so_far[-context_len:]
 
             x_tensor = (
@@ -443,16 +475,22 @@ class MSWTGRUMLPModel(BasePyTorchVolatilityModel):
             history_y.append(actual_y_scaled)
             history_rs.append(actual_rs)
 
-            if i % self.retrain_freq == 0:
+            if self.retrain_freq > 0 and i % self.retrain_freq == 0 and self.fine_tune_epochs > 0:
                 val_len = max(context_len + 1, min(30, len(history_y) - context_len - 1))
                 if val_len > 0 and len(history_y) > val_len:
-                    y_ft_train = np.array(history_y[:-val_len])
-                    rs_ft_train = np.array(history_rs[:-val_len])
-                    y_ft_val = np.array(history_y[-val_len:])
-                    rs_ft_val = np.array(history_rs[-val_len:])
+                    split_ft = len(history_y) - val_len
+                    arr_all = np.asarray(history_y, dtype=np.float64)
+                    rs_all = np.asarray(history_rs, dtype=np.float64)
 
-                    bands_ft_train = self._causal_bands(y_ft_train)
-                    bands_ft_val = self._causal_bands(y_ft_val)
+                    # Compute causal bands over the full history before slicing chronologically.
+                    bands_all = self._cached_bands_for_prefix(arr_all, offset=0)
+
+                    bands_ft_train = bands_all[:split_ft]
+                    rs_ft_train = rs_all[:split_ft]
+
+                    val_start_ctx = max(0, split_ft - context_len)
+                    bands_ft_val = bands_all[val_start_ctx:]
+                    rs_ft_val = rs_all[val_start_ctx:]
 
                     ft_train_dataset = CausalBandWindowDataset(
                         bands_ft_train, rs_ft_train, context_len

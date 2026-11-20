@@ -70,6 +70,8 @@ project:
     title: "Modelo EGARCH"
   - file: notebooks/06_har_model.ipynb
     title: "Modelo HAR"
+  - file: notebooks/07_wtd_har_model.ipynb
+    title: "Modelo WTD-HAR"    
   - file: notebooks/08_gru_model.ipynb
     title: "Gated Recurrent Unit"
 
