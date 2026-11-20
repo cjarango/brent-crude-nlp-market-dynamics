@@ -31,15 +31,10 @@ __all__ = ["TCNModel"]
 
 
 class CausalConv1d(nn.Module):
-    """1D convolution with causal padding (left-only).
-    
-    NOTE: WeightNorm was removed to prevent 0/0 = NaN errors during 
-    backpropagation when combined with weight_decay and ReLU.
-    """
+    """1D convolution with causal padding (left-only)."""
     def __init__(self, in_channels, out_channels, kernel_size, dilation):
         super().__init__()
         self.padding = (kernel_size - 1) * dilation
-        # El ajuste de Claude: Convolución estándar sin weight_norm
         self.conv = nn.Conv1d(
             in_channels, out_channels, kernel_size, dilation=dilation
         )
@@ -133,7 +128,6 @@ class TCNModel(BasePyTorchVolatilityModel):
             "max_epochs": 200,
             "patience": 20,
             "retrain_freq": 1,
-            "target_scale": 1e4,
             "seed": 42,
         }
 

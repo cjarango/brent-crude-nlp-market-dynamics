@@ -2,9 +2,9 @@
 gating_mechanism
 ================
 
-Dynamic gating network for the MS-WT-LSTM.
+Dynamic gating network for the MS-WT-GRU.
 
-Takes the concatenated hidden states of the J+1 LSTMs and produces a
+Takes the concatenated hidden states of the J+1 GRUs and produces a
 probability vector over the J+1 wavelet components, using a funnel-shaped
 MLP followed by a Softmax.
 """
@@ -17,15 +17,7 @@ __all__ = ["GatingMechanism"]
 
 
 class GatingMechanism(nn.Module):
-    """Funnel-shaped gating network with a Softmax output.
-
-    Args:
-        input_dim: Input dimension, typically (J + 1) * hidden_size.
-        output_dim: Number of outputs, typically J + 1.
-        initial_dim: Width of the first hidden layer. Must be >= 16.
-        num_hidden_layers: Number of hidden layers. Must be >= 2.
-        dropout: Dropout rate after each hidden ReLU. Must be in [0, 0.5].
-    """
+    """Funnel-shaped gating network with a Softmax output."""
 
     def __init__(
         self,
