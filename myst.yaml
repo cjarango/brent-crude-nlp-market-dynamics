@@ -74,6 +74,8 @@ project:
     title: "Modelo WTD-HAR"    
   - file: notebooks/08_gru_model.ipynb
     title: "Gated Recurrent Unit"
+  - file: notebooks/09_tcn_model.ipynb
+    title: "Temporal Convolution Network"
 
 site:
   template: book-theme
