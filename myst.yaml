@@ -80,6 +80,10 @@ project:
     title: "Modelo BiGRU-TCN"
   - file: notebooks/11_causal_transformer.ipynb
     title: "Causal Transformer"
+  - file: notebooks/12_band_causal_tcn.ipynb
+    title: "Band Causal TCN"
+  - file: notebooks/13_comparacion_modelos.ipynb
+    title: "Comparación entre Modelos"
 
 site:
   template: book-theme
