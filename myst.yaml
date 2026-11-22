@@ -76,6 +76,10 @@ project:
     title: "Gated Recurrent Unit"
   - file: notebooks/09_tcn_model.ipynb
     title: "Temporal Convolution Network"
+  - file: notebooks/10_bigru_tcn_,model.ipynb
+    title: "Modelo BiGRU-TCN"
+  - file: notebooks/11_causal_transformer.ipynb
+    title: "Causal Transformer"
 
 site:
   template: book-theme
