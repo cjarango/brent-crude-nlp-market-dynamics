@@ -12,7 +12,7 @@ The toolkit is strictly model-agnostic: it only requires the true realized
 variance and the predicted variance series.
 """
 
-__version__ = "1.7.0"
+__version__ = "1.8.0"
 
 import base64
 import io
@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from IPython.display import HTML, display
-from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.lines import Line2D
 from matplotlib.patches import ConnectionPatch, Rectangle
 from src.eval.scorer import VolatilityScorer
 
@@ -35,6 +35,7 @@ __all__ = [
     "load_test_predictions_matrix",
     "model_confidence_set",
     "plot_cliffs_dm_heatmap",
+    "plot_mcs_bars",
     "plot_volatility_fit",
 ]
 
@@ -68,9 +69,9 @@ def plot_volatility_fit(
     line_width: float = 1.2,
     figsize: tuple = (12, 6),
     fmt: str = "svg",
-    dpi: int = 100
+    dpi: int = 100,
 ) -> None:
-    """Plots realized vs predicted variance, with optional zoom; ``zoom_pad_frac`` adds headroom around the zoomed region (rect + inset)."""
+    """Plots realized vs predicted variance, with optional zoom."""
     fig, ax = plt.subplots(figsize=figsize)
 
     ax.plot(dates, rs_variance, color="gray", linewidth=line_width, linestyle="-", label=label_realized)
@@ -123,7 +124,7 @@ def plot_volatility_fit(
             fill=False,
             edgecolor="black",
             linewidth=1.0,
-            alpha=1.0
+            alpha=1.0,
         )
         ax.add_patch(rect)
 
@@ -135,7 +136,7 @@ def plot_volatility_fit(
             color="black",
             linewidth=1.0,
             alpha=1.0,
-            zorder=10
+            zorder=10,
         )
 
         con_bot = ConnectionPatch(
@@ -146,24 +147,14 @@ def plot_volatility_fit(
             color="black",
             linewidth=1.0,
             alpha=1.0,
-            zorder=10
+            zorder=10,
         )
 
         fig.add_artist(con_top)
         fig.add_artist(con_bot)
 
     plt.tight_layout()
-
-    if fmt == "svg":
-        buf = io.BytesIO()
-        fig.savefig(buf, format="svg", bbox_inches="tight")
-        plt.close(fig)
-        display(HTML(f'<div style="display: flex; justify-content: center; width: 100%;">{buf.getvalue().decode("utf-8")}</div>'))
-    else:
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png", bbox_inches="tight", dpi=dpi)
-        plt.close(fig)
-        display(HTML(f'<div style="text-align: center; width: 100%;"><img src="data:image/png;base64,{base64.b64encode(buf.getbuffer()).decode("ascii")}"></div>'))
+    _display_figure(fig, fmt=fmt, dpi=dpi)
 
 
 def display_train_test_comparison(
@@ -176,7 +167,7 @@ def display_train_test_comparison(
     decimals: int = 4,
     column_titles: tuple = ("Métrica", "Entrenamiento (In-Sample)", "Prueba (Out-of-Sample)", "Diferencia Absoluta"),
     metrics: list | None = None,
-    show_diff: bool = True
+    show_diff: bool = True,
 ) -> None:
     """Generates a comparison table of Train (In-Sample) vs Test (Out-of-Sample) metrics."""
     expected_cols = 4 if show_diff else 3
@@ -197,7 +188,7 @@ def display_train_test_comparison(
         "hmae": "HMAE",
         "crps": "CRPS",
         "pinball_05": "Pinball (τ=0.05)",
-        "pinball_95": "Pinball (τ=0.95)"
+        "pinball_95": "Pinball (τ=0.95)",
     }
 
     if metrics is None:
@@ -210,7 +201,7 @@ def display_train_test_comparison(
     data = {
         column_titles[0]: labels,
         column_titles[1]: [f"{v:.{decimals}f}" for v in train_vals],
-        column_titles[2]: [f"{v:.{decimals}f}" for v in test_vals]
+        column_titles[2]: [f"{v:.{decimals}f}" for v in test_vals],
     }
 
     if show_diff:
@@ -239,8 +230,7 @@ def display_models_comparison(
     decimals: int = 4,
     first_col_title: str = "Modelo",
 ) -> None:
-    """Generates a styled comparison table across models sorted by QLIKE (or selected metric) for 5 metrics."""
-
+    """Generates a styled comparison table across models sorted by QLIKE (or selected metric)."""
     y_arr = np.asarray(y_true, dtype=float).ravel()
     preds_arr = np.asarray(preds_matrix, dtype=float)
     if preds_arr.ndim != 2:
@@ -298,6 +288,7 @@ def display_models_comparison(
         .set_table_styles(_table_style_rules())
     )
     _render_styled(styled_table)
+
 
 def load_test_predictions_matrix(
     csv_paths: list[str | Path],
@@ -505,7 +496,6 @@ def cliffs_delta(
         "pairwise": pairwise_results,
     }
 
-
 def plot_cliffs_dm_heatmap(
     cliff_results: dict,
     dm_results: dict | None = None,
@@ -514,11 +504,15 @@ def plot_cliffs_dm_heatmap(
     xlab: str = "Modelo B",
     ylab: str = "Modelo A",
     annot_decimals: int = 2,
+    max_marker_size: float = 1450.0,
+    min_marker_size: float = 750.0,
+    circle_alpha: float = 0.45,
+    legend_size: float = 11.5,
     figsize: tuple = (10, 8),
     fmt: str = "svg",
     dpi: int = 100,
 ) -> None:
-    """Plots a pairwise Cliff's delta heatmap modulated by whether DM 95% CI excludes zero."""
+    """Plots lower-triangle translucent pastel Cliff's delta circles with legible centered labels."""
     cliff_pair = cliff_results.get("pairwise", {})
     dm_pair = dm_results.get("pairwise", {}) if dm_results is not None else {}
 
@@ -530,18 +524,19 @@ def plot_cliffs_dm_heatmap(
 
     m_len = len(models)
     if m_len < 2:
-        raise ValueError("At least two models are required to plot the pairwise heatmap.")
+        raise ValueError("At least two models are required to plot the pairwise matrix.")
 
     delta_mat = np.zeros((m_len, m_len), dtype=float)
     active_mat = np.ones((m_len, m_len), dtype=bool)
-    annot_mat = np.full((m_len, m_len), "—", dtype=object)
+    annot_mat = np.full((m_len, m_len), "", dtype=object)
 
     for i, m_i in enumerate(models):
-        for j, m_j in enumerate(models):
+        for j in range(i + 1):
+            m_j = models[j]
             if i == j:
                 delta_mat[i, j] = 0.0
                 active_mat[i, j] = False
-                annot_mat[i, j] = "0.00"
+                annot_mat[i, j] = "—"
                 continue
 
             key_ij = f"{m_i}_vs_{m_j}"
@@ -572,60 +567,71 @@ def plot_cliffs_dm_heatmap(
             else:
                 active_mat[i, j] = True
 
-    cmap = LinearSegmentedColormap.from_list(
-        "cliff_diverging",
-        ["#0072B2", "#F7F7F7", "#D55E00"],
-    )
-    norm = plt.Normalize(vmin=-1.0, vmax=1.0)
-
     fig, ax = plt.subplots(figsize=figsize)
     ax.grid(False)
 
     for i in range(m_len):
-        for j in range(m_len):
+        for j in range(i + 1):
             if i == j:
-                face_color = "#EAEAEA"
-                edge_color = "black"
-                lw = 0.8
-                txt_color = "#555555"
-                txt_weight = "normal"
-            else:
-                base_rgba = np.array(cmap(norm(delta_mat[i, j])))
-                if active_mat[i, j]:
-                    face_color = base_rgba
-                    edge_color = "black"
-                    lw = 1.2
-                    txt_color = "black"
-                    txt_weight = "bold"
-                else:
-                    # Desaturate and fade inactive cells whose DM CI includes zero
-                    gray_val = 0.299 * base_rgba[0] + 0.587 * base_rgba[1] + 0.114 * base_rgba[2]
-                    muted_rgb = 0.65 * np.array([gray_val, gray_val, gray_val]) + 0.35 * np.ones(3)
-                    face_color = np.array([muted_rgb[0], muted_rgb[1], muted_rgb[2], 0.45])
-                    edge_color = "#999999"
-                    lw = 0.6
-                    txt_color = "#666666"
-                    txt_weight = "normal"
+                rect = Rectangle(
+                    (j - 0.5, i - 0.5),
+                    1.0,
+                    1.0,
+                    facecolor="#F5F5F5",
+                    edgecolor="#CCCCCC",
+                    linewidth=0.8,
+                )
+                ax.add_patch(rect)
+                ax.text(j, i, "—", ha="center", va="center", color="#555555", fontsize=10.5)
+                continue
 
             rect = Rectangle(
                 (j - 0.5, i - 0.5),
                 1.0,
                 1.0,
-                facecolor=face_color,
-                edgecolor=edge_color,
-                linewidth=lw,
+                facecolor="white",
+                edgecolor="#D8D8D8",
+                linewidth=0.8,
             )
             ax.add_patch(rect)
-            ax.text(
-                j,
-                i,
-                annot_mat[i, j],
-                ha="center",
-                va="center",
-                color=txt_color,
-                fontweight=txt_weight,
-                fontsize=10,
-            )
+
+            d_val = delta_mat[i, j]
+            abs_d = min(abs(d_val), 1.0)
+
+            if not active_mat[i, j]:
+                ax.scatter(
+                    [j],
+                    [i],
+                    s=55.0,
+                    color="#222222",
+                    marker="o",
+                    zorder=4,
+                )
+            else:
+                marker_size = min_marker_size + abs_d * (max_marker_size - min_marker_size)
+                circle_color = "#F4A28C" if d_val > 0.0 else "#89C4E1"
+                ax.scatter(
+                    [j],
+                    [i],
+                    s=marker_size,
+                    color=circle_color,
+                    alpha=circle_alpha,
+                    edgecolors="#333333",
+                    linewidths=0.9,
+                    marker="o",
+                    zorder=4,
+                )
+                ax.text(
+                    j,
+                    i,
+                    annot_mat[i, j],
+                    ha="center",
+                    va="center",
+                    color="#000000",
+                    fontweight="bold",
+                    fontsize=9.5,
+                    zorder=5,
+                )
 
     ax.set_xlim(-0.5, m_len - 0.5)
     ax.set_ylim(m_len - 0.5, -0.5)
@@ -638,26 +644,33 @@ def plot_cliffs_dm_heatmap(
     ax.set_title(title, fontsize=12, pad=14, loc="center")
     _style_axes(ax, tick_size=11)
 
-    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
-    sm.set_array([])
-    cbar = fig.colorbar(sm, ax=ax, fraction=0.046, pad=0.04)
-    cbar.set_label(r"Delta de Cliff ($\delta_{\mathrm{Cliff}}$)", fontsize=11)
-    cbar.ax.tick_params(labelsize=10)
+    legend_handles = [
+        Line2D(
+            [0], [0],
+            marker="o", color="w", label="δ > 0 (Modelo A mayor pérdida)",
+            markerfacecolor="#F4A28C", markeredgecolor="#333333", markersize=14, alpha=circle_alpha,
+        ),
+        Line2D(
+            [0], [0],
+            marker="o", color="w", label="δ < 0 (Modelo A menor pérdida)",
+            markerfacecolor="#89C4E1", markeredgecolor="#333333", markersize=14, alpha=circle_alpha,
+        ),
+        Line2D(
+            [0], [0],
+            marker="o", color="w", label="DM no significativo (IC 95% incluye 0)",
+            markerfacecolor="#222222", markersize=8,
+        ),
+    ]
+    ax.legend(
+        handles=legend_handles,
+        frameon=False,
+        loc="upper right",
+        fontsize=legend_size,
+    )
 
     plt.tight_layout()
-
-    if fmt == "svg":
-        buf = io.BytesIO()
-        fig.savefig(buf, format="svg", bbox_inches="tight")
-        plt.close(fig)
-        display(HTML(f'<div style="display: flex; justify-content: center; width: 100%;">{buf.getvalue().decode("utf-8")}</div>'))
-    else:
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png", bbox_inches="tight", dpi=dpi)
-        plt.close(fig)
-        display(HTML(f'<div style="text-align: center; width: 100%;"><img src="data:image/png;base64,{base64.b64encode(buf.getbuffer()).decode("ascii")}"></div>'))
-
-
+    _display_figure(fig, fmt=fmt, dpi=dpi)
+    
 def model_confidence_set(
     y_true: np.ndarray,
     preds_matrix: np.ndarray,
@@ -769,10 +782,128 @@ def model_confidence_set(
         "bootstrap_type": bootstrap_type,
     }
 
+def plot_mcs_bars(
+    mcs_result: dict | pd.DataFrame,
+    title: str = "Model Confidence Set (MCS)",
+    xlab: str = "Pérdida Media (Fuera de Muestra)",
+    ylab: str = "Modelo",
+    decimals: int = 4,
+    figsize: tuple = (9, 5),
+    fmt: str = "svg",
+    dpi: int = 100,
+) -> None:
+    """Plots horizontal bars of mean loss ordered from best to worst with MCS cutoff line."""
+    if isinstance(mcs_result, dict):
+        mean_losses = mcs_result.get("mean_losses", {})
+        superior_set = set(mcs_result.get("superior_set", []))
+        if not mean_losses:
+            raise ValueError("mcs_result dict must contain a non-empty 'mean_losses' mapping.")
+        df = pd.DataFrame({
+            "model": list(mean_losses.keys()),
+            "mean_loss": [float(v) for v in mean_losses.values()],
+            "in_mcs": [m in superior_set for m in mean_losses.keys()],
+        })
+    elif isinstance(mcs_result, pd.DataFrame):
+        required = {"model", "mean_loss", "in_mcs"}
+        if not required.issubset(mcs_result.columns):
+            raise ValueError(f"DataFrame must contain columns: {required}")
+        df = mcs_result[["model", "mean_loss", "in_mcs"]].copy()
+        df["mean_loss"] = df["mean_loss"].astype(float)
+        df["in_mcs"] = df["in_mcs"].astype(bool)
+    else:
+        raise TypeError("mcs_result must be a dict from model_confidence_set or a DataFrame.")
+
+    df_sorted = df.sort_values("mean_loss", ascending=True).reset_index(drop=True)
+    y_pos = np.arange(len(df_sorted))
+    losses = df_sorted["mean_loss"].to_numpy()
+    in_mcs = df_sorted["in_mcs"].to_numpy()
+
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.grid(False)
+
+    for idx in range(len(df_sorted)):
+        if in_mcs[idx]:
+            ax.barh(
+                y_pos[idx],
+                losses[idx],
+                height=0.55,
+                color="#89C4E1",
+                edgecolor="#222222",
+                linewidth=0.8,
+            )
+        else:
+            ax.barh(
+                y_pos[idx],
+                losses[idx],
+                height=0.55,
+                color="white",
+                edgecolor="#222222",
+                hatch="///",
+                linewidth=0.8,
+            )
+
+    excluded_idx = np.where(~in_mcs)[0]
+    if len(excluded_idx) > 0 and excluded_idx[0] > 0:
+        cut_y = excluded_idx[0] - 0.5
+        ax.axhline(cut_y, color="#111111", linestyle="--", linewidth=1.2)
+        ax.text(
+            float(np.max(losses)) * 0.99,
+            cut_y - 0.12,
+            "Fuera del MCS",
+            ha="right",
+            va="bottom",
+            fontsize=9.5,
+            style="italic",
+            color="#111111",
+        )
+
+    pad_x = max(float(np.max(losses)) * 0.015, 1e-6)
+    for idx, val in enumerate(losses):
+        ax.text(
+            val + pad_x,
+            y_pos[idx],
+            f"{val:.{decimals}f}",
+            va="center",
+            ha="left",
+            fontsize=9.5,
+            color="#111111",
+        )
+
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(df_sorted["model"])
+    ax.invert_yaxis()
+    ax.set_xlim(0.0, float(np.max(losses)) * 1.15)
+    ax.set_xlabel(xlab, fontsize=12, labelpad=10)
+    ax.set_ylabel(ylab, fontsize=12, labelpad=10)
+    ax.set_title(title, fontsize=12, pad=14, loc="center")
+    _style_axes(ax, tick_size=11)
+
+    legend_handles = [
+        Rectangle((0, 0), 1, 1, facecolor="#89C4E1", edgecolor="#222222", label="Incluido en MCS"),
+        Rectangle((0, 0), 1, 1, facecolor="white", edgecolor="#222222", hatch="///", label="Excluido del MCS"),
+    ]
+    ax.legend(handles=legend_handles, frameon=False, loc="lower right", fontsize=10.5)
+
+    plt.tight_layout()
+    _display_figure(fig, fmt=fmt, dpi=dpi)
 
 # ===========================================================================
 # PRIVATE HELPERS
 # ===========================================================================
+
+def _display_figure(fig: plt.Figure, fmt: str = "svg", dpi: int = 100) -> None:
+    """Renders a matplotlib figure in IPython as centered SVG or PNG."""
+    if fmt == "svg":
+        buf = io.BytesIO()
+        fig.savefig(buf, format="svg", bbox_inches="tight")
+        plt.close(fig)
+        display(HTML(f'<div style="display: flex; justify-content: center; width: 100%;">{buf.getvalue().decode("utf-8")}</div>'))
+    else:
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", bbox_inches="tight", dpi=dpi)
+        plt.close(fig)
+        display(HTML(f'<div style="text-align: center; width: 100%;"><img src="data:image/png;base64,{base64.b64encode(buf.getbuffer()).decode("ascii")}"></div>'))
+
 
 def _compute_model_losses(
     y_true: np.ndarray,
@@ -906,11 +1037,11 @@ def _style_axes(ax, tick_size):
 
 def _table_style_rules() -> list:
     return [
-        {'selector': '', 'props': [('margin-left', 'auto'), ('margin-right', 'auto'), ('width', 'auto'), ('border-collapse', 'collapse')]},
-        {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#f2f2f2'), ('color', 'black'), ('font-weight', 'bold'), ('border', '1px solid black'), ('padding', '10px')]},
-        {'selector': 'td', 'props': [('text-align', 'center'), ('border', '1px solid black'), ('padding', '10px')]},
-        {'selector': 'th:first-child', 'props': [('text-align', 'left')]},
-        {'selector': 'td:first-child', 'props': [('text-align', 'left')]}
+        {"selector": "", "props": [("margin-left", "auto"), ("margin-right", "auto"), ("width", "auto"), ("border-collapse", "collapse")]},
+        {"selector": "th", "props": [("text-align", "center"), ("background-color", "#f2f2f2"), ("color", "black"), ("font-weight", "bold"), ("border", "1px solid black"), ("padding", "10px")]},
+        {"selector": "td", "props": [("text-align", "center"), ("border", "1px solid black"), ("padding", "10px")]},
+        {"selector": "th:first-child", "props": [("text-align", "left")]},
+        {"selector": "td:first-child", "props": [("text-align", "left")]},
     ]
 
 
