@@ -78,6 +78,18 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
 
         self.logger = setup_logger(self.__class__.__name__)
 
+    def _augment_series(
+        self, y_scaled: np.ndarray, fit_end_idx: int | None = None
+    ) -> np.ndarray:
+        """Optional hook to enrich a continuous 1D scaled return series before windowing.
+
+        By default returns ``y_scaled`` unchanged so existing 1-channel models
+        behave identically. Subclasses can override this to append causal
+        exogenous channels (e.g., Markov regime probabilities) on the full
+        contiguous series before sliding windows and batches are created.
+        """
+        return y_scaled
+
     def fit(self, y_train: np.ndarray, rs_train: np.ndarray | None = None) -> None:
         """Trains the model with a strict chronological 80/20 internal split."""
         if rs_train is None:
@@ -89,14 +101,14 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
         split_idx = int(len(y_train) * 0.8)
         
         y_tr_raw = y_train[:split_idx]
-        y_val_raw = y_train[split_idx:]
         self.scaler.fit(y_tr_raw.reshape(-1, 1))
-        
-        y_tr = self.scaler.transform(y_tr_raw.reshape(-1, 1)).flatten()
-        y_val = self.scaler.transform(y_val_raw.reshape(-1, 1)).flatten()
         
         self.y_train_history = self.scaler.transform(y_train.reshape(-1, 1)).flatten()
         self.rs_train_history = rs_train.copy()
+
+        y_all_aug = self._augment_series(self.y_train_history, fit_end_idx=split_idx)
+        y_tr = y_all_aug[:split_idx]
+        y_val = y_all_aug[split_idx:]
 
         rs_tr = rs_train[:split_idx] * self.target_scale
         rs_val = rs_train[split_idx:] * self.target_scale
@@ -201,11 +213,13 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
         history_rs = list(self.rs_train_history * self.target_scale)
 
         for i in range(len(y_seq)):
-            current_window = np.array(history_y[-context_len:])
+            hist_aug = self._augment_series(np.asarray(history_y), fit_end_idx=None)
+            current_window = np.asarray(hist_aug[-context_len:], dtype=np.float32)
+            if current_window.ndim == 1:
+                current_window = current_window[:, np.newaxis]
             x_tensor = (
                 torch.tensor(current_window, dtype=torch.float32)
                 .unsqueeze(0)
-                .unsqueeze(-1)
                 .to(self.device)
             )
 
@@ -228,10 +242,14 @@ class BasePyTorchVolatilityModel(BaseVolatilityModel):
                 val_len = max(context_len + 1, min(30, len(history_y) - context_len - 1))
                 
                 if val_len > 0 and len(history_y) > val_len:
-                    y_ft_train = np.array(history_y[:-val_len])
-                    rs_ft_train = np.array(history_rs[:-val_len])
-                    y_ft_val = np.array(history_y[-val_len:])
-                    rs_ft_val = np.array(history_rs[-val_len:])
+                    ft_fit_end = len(history_y) - val_len
+                    ft_aug = self._augment_series(
+                        np.asarray(history_y), fit_end_idx=ft_fit_end
+                    )
+                    y_ft_train = ft_aug[:ft_fit_end]
+                    rs_ft_train = np.array(history_rs[:ft_fit_end])
+                    y_ft_val = ft_aug[ft_fit_end:]
+                    rs_ft_val = np.array(history_rs[ft_fit_end:])
 
                     ft_train_dataset = TimeSeriesDataset(y_ft_train, rs_ft_train, context_len)
                     ft_val_dataset = TimeSeriesDataset(y_ft_val, rs_ft_val, context_len)

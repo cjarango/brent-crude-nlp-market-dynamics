@@ -21,9 +21,9 @@ class TimeSeriesDataset(Dataset):
     is ``N - look_back``.
 
     Attributes:
-        returns (torch.Tensor): Return series as ``float32`` tensor, shape ``(N,)``.
+        returns (torch.Tensor): Input series as ``float32`` tensor, shape ``(N,)`` or ``(N, C)``.
         targets (torch.Tensor): RS variance series as ``float32`` tensor, shape ``(N,)``.
-        look_back (int): Number of past returns in each input window.
+        look_back (int): Number of past steps in each input window.
     """
 
     def __init__(
@@ -35,10 +35,10 @@ class TimeSeriesDataset(Dataset):
         """Initializes the dataset.
 
         Args:
-            returns (np.ndarray): Log-return series of shape ``(N,)``.
+            returns (np.ndarray): Log-return or feature series of shape ``(N,)`` or ``(N, C)``.
             targets (np.ndarray): Rogers-Satchell variance series of shape ``(N,)``,
                 aligned index-by-index with ``returns``.
-            look_back (int): Number of past returns used as input context.
+            look_back (int): Number of past steps used as input context.
 
         Raises:
             ValueError: If ``look_back`` is not positive, if the arrays have
@@ -73,9 +73,11 @@ class TimeSeriesDataset(Dataset):
             idx (int): Index in ``[0, len(self) - 1]``.
 
         Returns:
-            tuple[torch.Tensor, torch.Tensor]: ``x`` of shape ``(look_back, 1)``
+            tuple[torch.Tensor, torch.Tensor]: ``x`` of shape ``(look_back, C)``
             and ``y`` of shape ``(1,)``.
         """
-        x = self.returns[idx : idx + self.look_back].unsqueeze(-1)
+        x = self.returns[idx : idx + self.look_back]
+        if x.ndim == 1:
+            x = x.unsqueeze(-1)
         y = self.targets[idx + self.look_back].unsqueeze(0)
         return x, y
