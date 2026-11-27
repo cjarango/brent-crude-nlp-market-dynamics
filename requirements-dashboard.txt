@@ -1,0 +1,14 @@
+dash==4.5.1
+dash-ag-grid==35.3.0
+dash-bootstrap-components==2.0.4
+dash-iconify==0.1.2
+dash-mantine-components==3.0.0
+Flask==3.1.3
+numpy==2.2.6
+pandas==2.3.3
+plotly==7.2.0
+pyarrow==25.0.1
+PyWavelets==1.8.0
+scipy==1.15.3
+statsmodels==0.15.0
+gunicorn==23.0.0

@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: brent-quant
+    runtime: python
+    plan: free
+    branch: dashboard-deploy
+    buildCommand: pip install -r requirements-dashboard.txt
+    startCommand: gunicorn --chdir dashboard app:server --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 120
+    autoDeploy: false
