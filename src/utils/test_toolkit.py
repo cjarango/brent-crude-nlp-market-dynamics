@@ -12,7 +12,7 @@ The toolkit is strictly model-agnostic: it only requires the true realized
 variance and the predicted variance series.
 """
 
-__version__ = "1.8.0"
+__version__ = "1.9.0"
 
 import base64
 import io
@@ -25,6 +25,7 @@ import pandas as pd
 from IPython.display import HTML, display
 from matplotlib.lines import Line2D
 from matplotlib.patches import ConnectionPatch, Rectangle
+from scipy import stats
 from src.eval.scorer import VolatilityScorer
 
 __all__ = [
@@ -36,6 +37,7 @@ __all__ = [
     "model_confidence_set",
     "plot_cliffs_dm_heatmap",
     "plot_mcs_bars",
+    "plot_price_prediction_bands",
     "plot_volatility_fit",
 ]
 
@@ -155,6 +157,173 @@ def plot_volatility_fit(
 
     plt.tight_layout()
     _display_figure(fig, fmt=fmt, dpi=dpi)
+
+
+def plot_price_prediction_bands(
+    dates: pd.DatetimeIndex,
+    prices_true: np.ndarray,
+    pred_volatility: np.ndarray,
+    *,
+    is_variance: bool = False,
+    returns_true: np.ndarray | None = None,
+    z_train: np.ndarray | None = None,
+    r_train: np.ndarray | None = None,
+    var_pred_train: np.ndarray | None = None,
+    alpha: float = 0.05,
+    method: str = "fhs",
+    mu: float = 0.0,
+    show_train_band: bool = False,
+    train_mask: np.ndarray | None = None,
+    title: str = "Trayectoria de Precio y Bandas de Predicción",
+    xlab: str = "Fecha",
+    ylab: str = "Precio (USD)",
+    label_real: str = "Precio Real",
+    label_band: str | None = None,
+    legend_loc: str = "upper left",
+    legend_bbox: tuple = (0.01, 0.99),
+    legend_size: float = 12,
+    ylim: tuple | None = None,
+    y_step: float | None = None,
+    pads: tuple = (12, 12, 15),
+    label_size: float = 12,
+    title_size: float = 12,
+    tick_size: float = 11,
+    line_width: float = 1.2,
+    figsize: tuple = (12, 6),
+    fmt: str = "svg",
+    dpi: int = 100,
+) -> pd.DataFrame:
+    """Plots price trajectory with FHS or Student-t prediction bands derived from volatility."""
+    dates_idx = pd.DatetimeIndex(dates)
+    p_true = np.asarray(prices_true, dtype=float)
+    sigma_all = np.asarray(pred_volatility, dtype=float)
+    if is_variance:
+        sigma_all = np.sqrt(np.maximum(sigma_all, 1e-12))
+    else:
+        sigma_all = np.maximum(sigma_all, 1e-12)
+
+    if returns_true is not None:
+        r_all = np.asarray(returns_true, dtype=float)
+    else:
+        r_all = np.empty_like(p_true)
+        r_all[0] = 0.0
+        r_all[1:] = np.log(np.maximum(p_true[1:], 1e-12) / np.maximum(p_true[:-1], 1e-12))
+
+    if z_train is not None:
+        z_cal = np.asarray(z_train, dtype=float)
+    elif r_train is not None and var_pred_train is not None:
+        sig_tr = np.sqrt(np.maximum(np.asarray(var_pred_train, dtype=float), 1e-12))
+        r_tr = np.asarray(r_train, dtype=float)
+        z_cal = r_tr / sig_tr
+    elif train_mask is not None:
+        z_cal = r_all[train_mask] / sigma_all[train_mask]
+    else:
+        z_cal = r_all / sigma_all
+
+    z_cal = z_cal[np.isfinite(z_cal)]
+
+    if method == "fhs":
+        q_low = float(np.quantile(z_cal, alpha / 2.0))
+        q_high = float(np.quantile(z_cal, 1.0 - alpha / 2.0))
+    elif method == "student_t":
+        nu, _, _ = stats.t.fit(z_cal, floc=0.0, fscale=1.0)
+        nu = max(float(nu), 2.05)
+        scale_unit = np.sqrt((nu - 2.0) / nu)
+        q_low = float(stats.t.ppf(alpha / 2.0, df=nu) * scale_unit)
+        q_high = float(stats.t.ppf(1.0 - alpha / 2.0, df=nu) * scale_unit)
+    else:
+        raise ValueError("method must be 'fhs' or 'student_t'.")
+
+    p_prev = np.empty_like(p_true)
+    p_prev[0] = p_true[0]
+    p_prev[1:] = p_true[:-1]
+
+    r_low = mu + q_low * sigma_all
+    r_high = mu + q_high * sigma_all
+    p_low = p_prev * np.exp(r_low)
+    p_high = p_prev * np.exp(r_high)
+    covered = (r_all >= r_low) & (r_all <= r_high)
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    band_label = label_band or f"Banda {method.upper()} ({int((1.0 - alpha) * 100)}%)"
+
+    if train_mask is not None and show_train_band:
+        ax.fill_between(
+            dates_idx[train_mask],
+            p_low[train_mask],
+            p_high[train_mask],
+            color="#0072B2",
+            alpha=0.14,
+            label=band_label,
+        )
+        test_mask = ~train_mask
+        ax.fill_between(
+            dates_idx[test_mask],
+            p_low[test_mask],
+            p_high[test_mask],
+            color="#0072B2",
+            alpha=0.28,
+        )
+        if np.any(test_mask):
+            ax.axvline(dates_idx[test_mask][0], color="black", linestyle="--", linewidth=1.0)
+    elif train_mask is not None:
+        test_mask = ~train_mask
+        ax.fill_between(
+            dates_idx[test_mask],
+            p_low[test_mask],
+            p_high[test_mask],
+            color="#0072B2",
+            alpha=0.25,
+            label=band_label,
+        )
+    else:
+        ax.fill_between(
+            dates_idx,
+            p_low,
+            p_high,
+            color="#0072B2",
+            alpha=0.25,
+            label=band_label,
+        )
+
+    ax.plot(
+        dates_idx,
+        p_true,
+        color="gray",
+        linewidth=line_width,
+        linestyle="-",
+        label=label_real,
+    )
+
+    pad_x, pad_y, pad_title = pads
+    ax.set_title(title, fontsize=title_size, pad=pad_title, loc="center")
+    ax.set_ylabel(ylab, fontsize=label_size, labelpad=pad_y)
+    ax.set_xlabel(xlab, fontsize=label_size, labelpad=pad_x)
+
+    _style_axes(ax, tick_size)
+    ax.grid(False)
+
+    if ylim is not None:
+        ax.set_ylim(ylim)
+    if y_step is not None:
+        ax.yaxis.set_major_locator(plt.MultipleLocator(y_step))
+
+    ax.legend(frameon=False, fontsize=legend_size, loc=legend_loc, bbox_to_anchor=legend_bbox)
+
+    plt.tight_layout()
+    _display_figure(fig, fmt=fmt, dpi=dpi)
+
+    return pd.DataFrame({
+        "date": dates_idx,
+        "p_true": p_true,
+        "p_low": p_low,
+        "p_high": p_high,
+        "r_true": r_all,
+        "r_low": r_low,
+        "r_high": r_high,
+        "covered": covered,
+    })
 
 
 def display_train_test_comparison(
@@ -496,6 +665,7 @@ def cliffs_delta(
         "pairwise": pairwise_results,
     }
 
+
 def plot_cliffs_dm_heatmap(
     cliff_results: dict,
     dm_results: dict | None = None,
@@ -670,7 +840,8 @@ def plot_cliffs_dm_heatmap(
 
     plt.tight_layout()
     _display_figure(fig, fmt=fmt, dpi=dpi)
-    
+
+
 def model_confidence_set(
     y_true: np.ndarray,
     preds_matrix: np.ndarray,
@@ -782,6 +953,7 @@ def model_confidence_set(
         "bootstrap_type": bootstrap_type,
     }
 
+
 def plot_mcs_bars(
     mcs_result: dict | pd.DataFrame,
     title: str = "Model Confidence Set (MCS)",
@@ -886,6 +1058,7 @@ def plot_mcs_bars(
 
     plt.tight_layout()
     _display_figure(fig, fmt=fmt, dpi=dpi)
+
 
 # ===========================================================================
 # PRIVATE HELPERS
