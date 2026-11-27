@@ -1,0 +1,463 @@
+.eda-page {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    padding-bottom: 24px;
+}
+
+.eda-page .row {
+    align-items: stretch;
+    margin-left: 0;
+    margin-right: 0;
+}
+
+.eda-page .row > * {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.eda-page .panel {
+    height: auto;
+    min-height: 0;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.eda-page .eda-card {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    min-width: 0;
+    max-width: 100%;
+    padding: 22px;
+    overflow: visible;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+}
+
+.eda-page .row > div:has(> .eda-card) {
+    display: flex;
+    flex-direction: column;
+}
+
+.eda-page .row > div > .eda-card {
+    flex: 1 0 auto;
+}
+
+.eda-page .eda-title {
+    color: var(--navy);
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+    line-height: 1.5;
+    margin: 0 0 16px;
+}
+
+.eda-page .dash-graph {
+    display: block;
+    position: relative;
+    flex: 0 0 auto;
+    width: 100%;
+    height: 320px !important;
+    min-height: 320px !important;
+    max-width: 100%;
+    min-width: 0;
+    margin: 0;
+}
+
+.eda-page .dash-graph .js-plotly-plot,
+.eda-page .dash-graph .plot-container,
+.eda-page .dash-graph .svg-container {
+    width: 100% !important;
+    height: 100% !important;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.eda-page .eda-note {
+    position: static;
+    display: block;
+    flex-shrink: 0;
+    width: 100%;
+    color: var(--slate);
+    font-size: 12px;
+    line-height: 1.75;
+    white-space: normal;
+    overflow-wrap: break-word;
+    padding-top: 12px;
+}
+
+.eda-page .eda-card .eda-note {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+}
+
+.eda-page .eda-filters {
+    height: auto;
+    padding: 22px 24px;
+    margin-bottom: 24px;
+}
+
+.eda-page .eda-filters label {
+    display: block;
+    color: var(--navy);
+    font-size: 12px;
+    font-weight: 600;
+    margin: 12px 0 8px;
+}
+
+.eda-page .eda-filters .row {
+    align-items: flex-start;
+}
+
+.eda-page .eda-filters .Select-control {
+    min-height: 38px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    box-shadow: none;
+}
+
+.eda-page .eda-filters .Select-control:hover {
+    border-color: var(--gold);
+}
+
+.eda-page .eda-filters .Select-value-label {
+    color: var(--navy) !important;
+    font-size: 12px;
+}
+
+.eda-page .eda-filters .Select-menu-outer {
+    z-index: 100;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+}
+
+.eda-page .eda-filters .VirtualizedSelectFocusedOption {
+    background: var(--bg);
+    color: var(--navy);
+}
+
+.eda-page .eda-filters .DateRangePicker {
+    width: 100%;
+    max-width: 100%;
+}
+
+.eda-page .eda-filters .DateRangePickerInput {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    max-width: 100%;
+    min-height: 38px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+}
+
+.eda-page .eda-filters .DateInput {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+    background: transparent;
+}
+
+.eda-page .eda-filters .DateInput_input {
+    width: 100%;
+    padding: 8px 10px;
+    color: var(--navy);
+    font-family: var(--font-main);
+    font-size: 12px;
+    background: transparent;
+    border-bottom: 2px solid transparent;
+}
+
+.eda-page .eda-filters .DateInput_input__focused {
+    border-bottom-color: var(--gold);
+}
+
+.eda-page .eda-filters .DateRangePickerInput_arrow {
+    flex-shrink: 0;
+    color: var(--slate);
+}
+
+.eda-page .eda-filters .CalendarDay__selected,
+.eda-page .eda-filters .CalendarDay__selected:hover {
+    color: var(--surface);
+    background: var(--navy);
+    border-color: var(--navy);
+}
+
+.eda-page .eda-filters .CalendarDay__selected_span {
+    color: var(--navy);
+    background: rgba(183, 149, 89, 0.18);
+    border-color: rgba(183, 149, 89, 0.25);
+}
+
+.eda-page .rc-slider {
+    margin-top: 8px;
+}
+
+.eda-page .rc-slider-rail {
+    height: 4px;
+    background: rgba(100, 116, 139, 0.18);
+}
+
+.eda-page .rc-slider-track {
+    height: 4px;
+    background: var(--gold) !important;
+}
+
+.eda-page .rc-slider-handle {
+    width: 15px;
+    height: 15px;
+    margin-top: -5px;
+    background: var(--navy) !important;
+    border: 2px solid var(--surface) !important;
+    box-shadow: 0 0 0 1px var(--navy);
+    opacity: 1;
+}
+
+.eda-page .rc-slider-handle:hover,
+.eda-page .rc-slider-handle:active,
+.eda-page .rc-slider-handle:focus-visible {
+    border-color: var(--surface) !important;
+    box-shadow: 0 0 0 3px rgba(183, 149, 89, 0.35);
+}
+
+.eda-page .rc-slider-dot {
+    background: var(--surface);
+    border-color: var(--border);
+}
+
+.eda-page .rc-slider-dot-active {
+    border-color: var(--gold);
+}
+
+.eda-page .rc-slider-mark-text {
+    color: var(--slate);
+    font-family: var(--font-mono);
+    font-size: 10px;
+}
+
+.eda-page .rc-slider-mark-text-active {
+    color: var(--navy);
+}
+
+.eda-page #eda-lags {
+    --Dash-Fill-Interactive-Strong: var(--gold);
+    --Dash-Fill-Interactive-Weak: rgba(183, 149, 89, 0.18);
+}
+
+.eda-page .eda-tabs {
+    margin-bottom: 24px;
+    width: 100%;
+    min-width: 0;
+}
+
+.eda-page .eda-tab {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 48px;
+    padding: 12px 10px !important;
+    color: var(--slate) !important;
+    background: var(--surface) !important;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.5;
+    border: 1px solid var(--border) !important;
+    border-top: 3px solid transparent !important;
+    transition: background 0.2s, color 0.2s;
+}
+
+.eda-page .eda-tab:hover {
+    color: var(--navy) !important;
+    background: var(--bg) !important;
+}
+
+.eda-page .eda-tab-selected {
+    color: var(--navy) !important;
+    background: var(--surface) !important;
+    border-top: 3px solid var(--gold) !important;
+    font-weight: 600 !important;
+}
+
+.eda-page .metric-card {
+    min-height: 122px;
+    padding: 20px 22px;
+}
+
+.eda-page .metric-card:hover {
+    transform: none;
+    border-color: var(--border);
+}
+
+.eda-page .metric-label {
+    font-size: 10px;
+    letter-spacing: 0.8px;
+}
+
+.eda-page .metric-value {
+    font-size: clamp(20px, 1.7vw, 29px);
+    line-height: 1.25;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+}
+
+.eda-page .metric-caption {
+    font-size: 11px;
+    line-height: 1.6;
+}
+
+.eda-page .dash-table-container {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.eda-page .dash-spreadsheet-container {
+    width: 100%;
+    min-width: 0;
+}
+
+.eda-page .dash-spreadsheet-container table {
+    width: 100%;
+    font-family: var(--font-main);
+}
+
+.eda-page .dash-spreadsheet-container th {
+    background: var(--bg) !important;
+    color: var(--navy) !important;
+    font-weight: 600 !important;
+    border-color: var(--border) !important;
+}
+
+.eda-page .dash-spreadsheet-container td {
+    color: var(--navy);
+    border-color: var(--border) !important;
+}
+
+.eda-page .dash-spreadsheet-container td.focused {
+    background: rgba(183, 149, 89, 0.08) !important;
+    outline: none;
+}
+
+.eda-page .modebar {
+    background: transparent !important;
+}
+
+.eda-page .modebar-btn {
+    opacity: 0.65;
+}
+
+.eda-page .modebar-btn:hover {
+    opacity: 1;
+}
+
+.eda-page #eda-content {
+    display: flow-root;
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    padding-bottom: 16px;
+}
+
+.terminal-footer {
+    position: static;
+    clear: both;
+    flex-shrink: 0;
+    height: auto;
+    min-height: 60px;
+}
+
+@media (max-width: 1200px) {
+
+    .eda-page .eda-card {
+        padding: 18px;
+    }
+
+    .eda-page .metric-card {
+        padding: 18px;
+    }
+
+    .eda-page .eda-tab {
+        font-size: 11px;
+    }
+
+}
+
+@media (max-width: 900px) {
+
+    .eda-page .eda-tabs .tab-container {
+        display: flex;
+        flex-wrap: wrap;
+    }
+
+    .eda-page .eda-tab {
+        flex: 1 1 33.333%;
+        min-width: 30%;
+    }
+
+    .eda-page .dash-graph {
+        height: 300px !important;
+        min-height: 300px !important;
+    }
+
+}
+
+@media (max-width: 768px) {
+
+    .eda-page {
+        padding-bottom: 16px;
+    }
+
+    .eda-page .eda-filters {
+        padding: 18px;
+    }
+
+    .eda-page .eda-card {
+        padding: 16px;
+    }
+
+    .eda-page .eda-tab {
+        flex: 1 1 50%;
+        min-width: 45%;
+    }
+
+    .eda-page .eda-title {
+        font-size: 15px;
+    }
+
+    .eda-page .metric-value {
+        font-size: 24px;
+    }
+
+}
+
+@media (max-width: 480px) {
+
+    .eda-page .eda-card {
+        padding: 14px;
+    }
+
+    .eda-page .dash-graph {
+        height: 280px !important;
+        min-height: 280px !important;
+    }
+
+    .eda-page .eda-filters {
+        padding: 16px;
+    }
+
+    .eda-page .eda-note {
+        font-size: 11px;
+    }
+
+}
